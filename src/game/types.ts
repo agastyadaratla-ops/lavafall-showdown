@@ -21,6 +21,9 @@ export interface Toast {
   kind: "good" | "bad" | "info";
 }
 
+/** The three horde archetypes. Shared so map palettes can tint them. */
+export type EnemyKind = "harasser" | "heavy" | "spitter";
+
 export interface HudState {
   phase: Phase;
   /** screen-relative bearing of the last damage source (radians, 0 = ahead), null for burns */

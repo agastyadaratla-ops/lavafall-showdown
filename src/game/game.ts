@@ -1,15 +1,13 @@
 import * as THREE from "three";
 import { Arena, ARENA_R } from "./arena";
+import { getMap, type MapDef } from "./maps";
 import { Sfx } from "./audio";
 import { BUFFS, UPGRADES } from "./upgrades";
-import type { BuffCard, HudState, Phase, ShopItem, Toast } from "./types";
+import type { BuffCard, EnemyKind, HudState, Phase, ShopItem, Toast } from "./types";
 
-type EnemyKind = "harasser" | "heavy" | "spitter";
 
 interface Enemy {
   kind: EnemyKind;
-  /** seconds of remaining credit after the player last damaged or knocked this enemy */
-  playerHitT: number;
   mesh: THREE.Group;
   mats: THREE.MeshLambertMaterial[];
   baseColor: number;
@@ -51,14 +49,17 @@ interface Projectile {
   life: number;
 }
 
-const BEST_KEY = "deadlands.bestWave";
+const bestKey = (mapId: string) =>
+  mapId === "deadlands" ? "deadlands.bestWave" : `deadlands.bestWave.${mapId}`;
 const MAX_ALIVE = 34;
 
 export class Game {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
-  private arena = new Arena();
+  private mapDef: MapDef = getMap("deadlands");
+  private arena = new Arena(this.mapDef);
+  private dome: THREE.Mesh;
   private sfx = new Sfx();
   private canvas: HTMLCanvasElement;
   private onState: (s: HudState) => void;
@@ -163,18 +164,16 @@ export class Game {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.6));
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
-    this.scene.background = new THREE.Color(0x2b1d1e);
-    // fog starts further out and thins more slowly so enemies stay readable at range
-    this.scene.fog = new THREE.Fog(0x4a2622, 40, 185);
     this.camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.05, 340);
     this.scene.add(this.arena.group);
 
-    // sky glow dome
-    const dome = new THREE.Mesh(
+    // sky dome - recoloured per map by applyTheme()
+    this.dome = new THREE.Mesh(
       new THREE.SphereGeometry(200, 20, 12),
-      new THREE.MeshBasicMaterial({ color: 0x5c2a2e, side: THREE.BackSide, fog: false }),
+      new THREE.MeshBasicMaterial({ side: THREE.BackSide, fog: false }),
     );
-    this.scene.add(dome);
+    this.scene.add(this.dome);
+    this.applyTheme();
 
     this.muzzle = new THREE.PointLight(0xffcc88, 0, 14, 2);
     this.scene.add(this.muzzle);
@@ -214,7 +213,7 @@ export class Game {
     this.particles = { points, pos, col, vel: new Float32Array(n * 3), life: new Float32Array(n), n, cursor: 0 };
     for (let i = 0; i < n; i++) pos[i * 3 + 1] = -999;
 
-    this.bestWave = Number(localStorage.getItem(BEST_KEY) || 0);
+    this.bestWave = Number(localStorage.getItem(bestKey(this.mapDef.id)) || 0);
 
     window.addEventListener("resize", this.onResize);
     window.addEventListener("keydown", this.onKeyDown);
@@ -256,7 +255,30 @@ export class Game {
   };
 
   // ---------------------------------------------------------------- commands
-  startRun() {
+  /** Background, fog and sky colour for the active map. */
+  private applyTheme() {
+    const d = this.mapDef;
+    this.scene.background = new THREE.Color(d.background);
+    // fog stays far out so enemies read at range across the wide crater
+    this.scene.fog = new THREE.Fog(d.fogColor, d.fogNear, d.fogFar);
+    (this.dome.material as THREE.MeshBasicMaterial).color.setHex(d.domeColor);
+  }
+
+  /** Swap the arena. Safe to call from the title screen between runs. */
+  setMap(id: string) {
+    if (id === this.mapDef.id) return;
+    this.mapDef = getMap(id);
+    this.scene.remove(this.arena.group);
+    this.arena.dispose();
+    this.arena = new Arena(this.mapDef);
+    this.scene.add(this.arena.group);
+    this.applyTheme();
+    this.bestWave = Number(localStorage.getItem(bestKey(this.mapDef.id)) || 0);
+    this.pushState();
+  }
+
+  startRun(mapId?: string) {
+    if (mapId) this.setMap(mapId);
     this.sfx.resume();
     this.resetRun();
     this.phase = "playing";
@@ -476,7 +498,7 @@ export class Game {
     this.toast(`Wave ${this.wave} cleared  +${bonus} slag`, "good");
     if (this.wave > this.bestWave) {
       this.bestWave = this.wave;
-      localStorage.setItem(BEST_KEY, String(this.bestWave));
+      localStorage.setItem(bestKey(this.mapDef.id), String(this.bestWave));
     }
     if (this.wave % 3 === 0) {
       const pool = BUFFS.filter((b) => !this.buffs.has(b.id));
@@ -735,9 +757,6 @@ export class Game {
     }
     if (source === "tackle" && this.buffs.has("juggernaut")) dmg *= 2;
     e.hp -= dmg;
-    // knockback from this hit can carry the enemy into a hazard, which still counts as the
-    // player's doing, so keep credit alive for a few seconds after contact
-    e.playerHitT = 3;
     e.flash = 0.12;
     this.hitFlash = crit ? 1 : 0.7;
     this.sfx.play("hitmark");
@@ -764,10 +783,9 @@ export class Game {
     e.alive = false;
     e.corpse = 1.1;
     e.mesh.rotation.z = Math.PI / 2.2;
-    // hazard deaths only count when the player drove the enemy in (shot, melee or tackle)
+    // environmental deaths never count as kills, however the enemy ended up there
     const hazard = source === "lava" || source === "geyser";
-    const credited = !hazard || e.playerHitT > 0;
-    if (credited) this.kills++;
+    if (!hazard) this.kills++;
     this.combo++;
     this.comboTimer = 3;
     this.sfx.play("kill");
@@ -776,10 +794,7 @@ export class Game {
     if (source === "lava" || source === "geyser") {
       reward += 25;
       const where = source === "lava" ? "Lava" : "Geyser";
-      this.toast(
-        credited ? `${where} kill! +bonus slag` : `${where} took one — no kill credit (+bonus slag)`,
-        credited ? "good" : "info",
-      );
+      this.toast(`${where} took one — no kill credit (+bonus slag)`, "info");
       this.fireBurst(e.mesh.position.x, e.mesh.position.z);
       if (this.buffs.has("wildfire")) {
         for (const o of this.enemies) {
@@ -847,7 +862,7 @@ export class Game {
     this.phase = "gameover";
     if (this.wave > this.bestWave) {
       this.bestWave = this.wave;
-      localStorage.setItem(BEST_KEY, String(this.bestWave));
+      localStorage.setItem(bestKey(this.mapDef.id), String(this.bestWave));
     }
     this.releaseLock();
     this.pushState();
@@ -857,7 +872,7 @@ export class Game {
   private makeEnemy(kind: EnemyKind): Enemy {
     const group = new THREE.Group();
     const mats: THREE.MeshLambertMaterial[] = [];
-    const color = kind === "heavy" ? 0xd9694a : kind === "spitter" ? 0x86d155 : 0xe0977c;
+    const color = this.mapDef.enemyTint[kind];
     // a low self-lit floor keeps silhouettes readable against the dark crater
     const skin = new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.22 });
     const dark = new THREE.MeshLambertMaterial({ color: 0x5a4038 });
@@ -907,7 +922,6 @@ export class Game {
       height: 2 * scale,
       speed: (b.speed as number) * (1 + Math.min(0.35, this.wave * 0.015)),
       damage: (b.damage as number) * (1 + 0.06 * (this.wave - 1)),
-      playerHitT: 0,
       attackCd: 0,
       stun: 0,
       stunMax: b.stunMax as number,
@@ -1119,7 +1133,8 @@ export class Game {
       } else {
         this.reviveT = Math.max(0, this.reviveT - dt * 0.6);
       }
-      if (this.bleed <= 0) {
+      // only bleed out while still down - a revive on this frame zeroes bleed deliberately
+      if (this.downed && this.bleed <= 0) {
         this.gameOver();
         return;
       }
@@ -1252,8 +1267,6 @@ export class Game {
         }
         continue;
       }
-
-      if (e.playerHitT > 0) e.playerHitT = Math.max(0, e.playerHitT - dt);
 
       // knockback integration
       m.position.x += e.vx * dt;

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Game } from "@/game/game";
+import { MAPS } from "@/game/maps";
 import type { HudState } from "@/game/types";
 
 const EMPTY: HudState = {
@@ -89,7 +90,15 @@ export default function DeadlandsGame() {
     };
   }, []);
 
-  const start = useCallback(() => gameRef.current?.startRun(), []);
+  const [mapId, setMapId] = useState(MAPS[0].id);
+  const activeMap = MAPS.find((m) => m.id === mapId) ?? MAPS[0];
+
+  const start = useCallback(() => gameRef.current?.startRun(mapId), [mapId]);
+  // swap the arena immediately so the title screen previews the map behind it
+  const pickMap = useCallback((id: string) => {
+    setMapId(id);
+    gameRef.current?.setMap(id);
+  }, []);
   const resume = useCallback(() => gameRef.current?.resume(), []);
   const restart = useCallback(() => gameRef.current?.restart(), []);
 
@@ -380,18 +389,37 @@ export default function DeadlandsGame() {
       {hud.phase === "title" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-gradient-to-b from-background/70 via-background/85 to-background">
           <div className="text-center">
-            <p className="text-display text-sm tracking-[0.5em] text-ember">Volcanic horde survival</p>
-            <h1 className="text-display text-6xl leading-none md:text-8xl">The Deadlands</h1>
-            <p className="mx-auto mt-4 max-w-xl text-sm text-muted-foreground">
-              A crater arena split by a lava river. Endless waves of flankers, spitters and chargers.
-              Bullets run out; the machete never does. Sprint, tackle and let the mountain do the killing.
-            </p>
+            <p className="text-display text-sm tracking-[0.5em] text-ember">{activeMap.tagline}</p>
+            <h1 className="text-display text-6xl leading-none md:text-8xl">{activeMap.name}</h1>
+            <p className="mx-auto mt-4 max-w-xl text-sm text-muted-foreground">{activeMap.blurb}</p>
           </div>
+
+          <div className="flex flex-wrap items-stretch justify-center gap-3">
+            {MAPS.map((m) => {
+              const selected = m.id === mapId;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => pickMap(m.id)}
+                  aria-pressed={selected}
+                  className={`w-52 rounded-md border px-4 py-3 text-left transition-colors ${
+                    selected
+                      ? "border-ember bg-ember/15"
+                      : "border-border bg-card/70 hover:border-ember/60"
+                  }`}
+                >
+                  <span className="text-display block text-base">{m.name}</span>
+                  <span className="block text-xs text-muted-foreground">{m.tagline}</span>
+                </button>
+              );
+            })}
+          </div>
+
           <button
             onClick={start}
             className="text-display rounded-sm bg-ember px-10 py-3 text-xl text-ember-foreground shadow-lg transition-transform hover:scale-105"
           >
-            Enter the crater
+            {activeMap.cta}
           </button>
           <div className="grid max-w-2xl grid-cols-2 gap-x-8 gap-y-1 text-sm text-muted-foreground md:grid-cols-3">
             {CONTROLS.map(([k, v]) => (
@@ -402,8 +430,9 @@ export default function DeadlandsGame() {
             ))}
           </div>
           <p className="text-xs text-muted-foreground">
-            Best wave so far: <span className="text-display text-ember">{hud.bestWave || "—"}</span> ·
-            Solo campaign — downed state uses adrenaline self-revives.
+            Best wave on {activeMap.name}:{" "}
+            <span className="text-display text-ember">{hud.bestWave || "—"}</span> · Solo campaign —
+            downed state uses adrenaline self-revives.
           </p>
         </div>
       )}

@@ -6,7 +6,12 @@
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
+// GitHub Pages serves project sites from /<repo>/, so the Pages workflow sets VITE_BASE.
+// Left unset (local dev, Lovable, Cloudflare) the app stays rooted at "/".
+const base = process.env.VITE_BASE || "/";
+
 export default defineConfig({
+  vite: { base },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
