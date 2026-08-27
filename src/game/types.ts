@@ -21,7 +21,20 @@ export interface Toast {
   kind: "good" | "bad" | "info";
 }
 
+import type { NetStatus } from "./net";
+
+export interface RosterEntry {
+  id: string;
+  name: string;
+  hp: number;
+  maxHp: number;
+  downed: boolean;
+  kills: number;
+}
+
 export interface HudState {
+  net: NetStatus;
+  roster: RosterEntry[];
   phase: Phase;
   /** screen-relative bearing of the last damage source (radians, 0 = ahead), null for burns */
   hurtDir: number | null;

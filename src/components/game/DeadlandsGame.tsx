@@ -5,6 +5,8 @@ import { WEAPONS, WEAPONS_BY_SLOT } from "@/game/weapons";
 import type { HudState } from "@/game/types";
 
 const EMPTY: HudState = {
+  net: { role: "solo", room: "", connected: false, peers: 0, error: "" },
+  roster: [],
   phase: "title",
   hurtDir: null,
   hurtDirT: 0,
@@ -96,6 +98,39 @@ export default function DeadlandsGame() {
   const [mapId, setMapId] = useState(MAPS[0].id);
   const activeMap = MAPS.find((m) => m.id === mapId) ?? MAPS[0];
 
+  const [name, setName] = useState("Hero");
+  const [joinCode, setJoinCode] = useState("");
+  const [netBusy, setNetBusy] = useState(false);
+  const [netErr, setNetErr] = useState("");
+
+  const doHost = useCallback(async () => {
+    setNetBusy(true);
+    setNetErr("");
+    try {
+      await gameRef.current?.hostGame(name);
+    } catch (e) {
+      setNetErr(String((e as Error)?.message ?? e));
+    }
+    setNetBusy(false);
+  }, [name]);
+
+  const doJoin = useCallback(async () => {
+    if (!joinCode.trim()) return;
+    setNetBusy(true);
+    setNetErr("");
+    try {
+      await gameRef.current?.joinGame(joinCode, name);
+    } catch (e) {
+      setNetErr(String((e as Error)?.message ?? e));
+    }
+    setNetBusy(false);
+  }, [joinCode, name]);
+
+  const doLeave = useCallback(() => {
+    gameRef.current?.leaveGame();
+    setNetErr("");
+  }, []);
+
   const start = useCallback(() => gameRef.current?.startRun(mapId), [mapId]);
   // swap the arena immediately so the title screen previews the map behind it
   const pickMap = useCallback((id: string) => {
@@ -144,6 +179,19 @@ export default function DeadlandsGame() {
             Critical — {Math.round((hud.hp / hud.maxHp) * 100)}% health
           </div>
         </>
+      )}
+
+      {playing && hud.roster.length > 0 && (
+        <div className="pointer-events-none absolute right-6 top-20 space-y-1 text-right text-xs">
+          {hud.roster.map((r) => (
+            <div key={r.id} className="text-display">
+              <span className={r.downed ? "text-destructive" : "text-foreground"}>{r.name}</span>{" "}
+              <span className="text-muted-foreground">
+                {r.downed ? "DOWNED" : `${r.hp}/${r.maxHp}`}
+              </span>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* damage / hit feedback */}
@@ -429,6 +477,81 @@ export default function DeadlandsGame() {
                 </button>
               );
             })}
+          </div>
+
+          <div className="w-[min(560px,92vw)] rounded-md border border-border bg-card/70 p-4">
+            <div className="text-display mb-3 text-center text-sm tracking-widest uppercase">
+              Co-op
+            </div>
+
+            {hud.net.role === "solo" ? (
+              <div className="flex flex-col gap-3">
+                <label className="flex items-center gap-3 text-sm">
+                  <span className="w-16 text-muted-foreground">Name</span>
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    maxLength={14}
+                    className="flex-1 rounded-sm border border-border bg-background px-2 py-1"
+                  />
+                </label>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={doHost}
+                    disabled={netBusy}
+                    className="text-display rounded-sm border border-ember px-4 py-2 text-sm disabled:opacity-50"
+                  >
+                    Host a game
+                  </button>
+                  <span className="text-xs text-muted-foreground">or</span>
+                  <input
+                    value={joinCode}
+                    onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                    placeholder="ROOM CODE"
+                    maxLength={5}
+                    className="text-display w-32 rounded-sm border border-border bg-background px-2 py-1 tracking-widest uppercase"
+                  />
+                  <button
+                    onClick={doJoin}
+                    disabled={netBusy || !joinCode.trim()}
+                    className="text-display rounded-sm border border-border px-4 py-2 text-sm disabled:opacity-50"
+                  >
+                    Join
+                  </button>
+                </div>
+
+                {netBusy && <p className="text-xs text-muted-foreground">Connecting…</p>}
+                {netErr && <p className="text-xs text-destructive">{netErr}</p>}
+                <p className="text-xs text-muted-foreground">
+                  Play solo, or share a room code to fight together. Connections are
+                  peer-to-peer — no server, no account.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">
+                    {hud.net.role === "host" ? "Hosting room" : "Joined room"}
+                  </span>
+                  <span className="text-display text-2xl tracking-[0.3em] text-ember">
+                    {hud.net.room}
+                  </span>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {hud.roster.length
+                    ? `In the squad: ${hud.roster.map((r) => r.name).join(", ")}`
+                    : "Waiting for teammates to join…"}
+                </div>
+                {hud.net.error && <p className="text-xs text-destructive">{hud.net.error}</p>}
+                <button
+                  onClick={doLeave}
+                  className="text-display self-start rounded-sm border border-border px-3 py-1 text-xs"
+                >
+                  Leave room
+                </button>
+              </div>
+            )}
           </div>
 
           <button

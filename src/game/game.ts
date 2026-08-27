@@ -2,11 +2,28 @@ import * as THREE from "three";
 import { Arena, ARENA_R } from "./arena";
 import { ENEMIES, pickEnemy, type EnemyBehavior, type EnemyKind } from "./enemies";
 import { getMap, type MapDef } from "./maps";
+import { NetSession, type NetMessage, type NetPlayer, type NetStatus } from "./net";
 import { WEAPONS, WEAPON_IDS, WEAPONS_BY_SLOT, type WeaponId } from "./weapons";
 import { Sfx } from "./audio";
 import { BUFFS, UPGRADES } from "./upgrades";
 import type { BuffCard, HudState, Phase, ShopItem, Toast } from "./types";
 
+
+/** Another player, driven entirely by network snapshots. */
+interface Remote {
+  id: string;
+  name: string;
+  mesh: THREE.Group;
+  /** where the last snapshot said they are; the mesh eases toward it */
+  target: THREE.Vector3;
+  yaw: number;
+  hp: number;
+  maxHp: number;
+  downed: boolean;
+  weapon: string;
+  kills: number;
+  seen: number;
+}
 
 interface Enemy {
   kind: EnemyKind;
@@ -161,6 +178,19 @@ export class Game {
   private lockTries = 0;
   private hudTimer = 0;
 
+  // ---- co-op
+  private net: NetSession;
+  private remotes = new Map<string, Remote>();
+  private netTimer = 0;
+  private netStatus: NetStatus = {
+    role: "solo",
+    room: "",
+    connected: false,
+    peers: 0,
+    error: "",
+  };
+  private playerName = "Hero";
+
   constructor(canvas: HTMLCanvasElement, onState: (s: HudState) => void) {
     this.canvas = canvas;
     this.onState = onState;
@@ -180,6 +210,16 @@ export class Game {
 
     this.muzzle = new THREE.PointLight(0xffcc88, 0, 14, 2);
     this.scene.add(this.muzzle);
+
+    this.net = new NetSession({
+      onMessage: (m, from) => this.onNet(m, from),
+      onPeerJoin: () => this.pushState(),
+      onPeerLeave: (id) => this.dropRemote(id),
+      onStatus: (st) => {
+        this.netStatus = st;
+        this.pushState();
+      },
+    });
 
     this.buildViewmodel();
     this.camera.add(this.viewmodel);
@@ -248,6 +288,7 @@ export class Game {
     document.removeEventListener("pointerlockerror", this.onLockError);
     window.clearTimeout(this.lockRetry);
     this.wantLock = false;
+    this.net.close();
     this.renderer.dispose();
   }
 
@@ -258,6 +299,147 @@ export class Game {
   };
 
   // ---------------------------------------------------------------- commands
+  // ---------------------------------------------------------------- co-op
+  setName(name: string) {
+    this.playerName = name.trim().slice(0, 14) || "Hero";
+  }
+
+  async hostGame(name: string) {
+    this.setName(name);
+    const code = await this.net.host(this.playerName);
+    this.pushState();
+    return code;
+  }
+
+  async joinGame(code: string, name: string) {
+    this.setName(name);
+    await this.net.join(code, this.playerName);
+    this.pushState();
+  }
+
+  leaveGame() {
+    this.net.close();
+    for (const id of [...this.remotes.keys()]) this.dropRemote(id);
+    this.pushState();
+  }
+
+  private onNet(m: NetMessage, from: string) {
+    if (m.t === "hello") {
+      this.ensureRemote(m.id || from, m.name);
+      this.pushState();
+      return;
+    }
+    if (m.t === "player") {
+      const r = this.ensureRemote(m.p.id, m.p.name);
+      r.target.set(m.p.x, m.p.y, m.p.z);
+      r.yaw = m.p.yaw;
+      r.hp = m.p.hp;
+      r.maxHp = m.p.maxHp;
+      r.downed = m.p.downed;
+      r.weapon = m.p.weapon;
+      r.kills = m.p.kills;
+      r.name = m.p.name;
+      r.seen = performance.now();
+      return;
+    }
+    if (m.t === "leave") this.dropRemote(m.id);
+  }
+
+  private ensureRemote(id: string, name: string) {
+    let r = this.remotes.get(id);
+    if (r) return r;
+    const mesh = this.makeHeroMesh();
+    this.scene.add(mesh);
+    r = {
+      id,
+      name,
+      mesh,
+      target: new THREE.Vector3(0, 0, 0),
+      yaw: 0,
+      hp: 100,
+      maxHp: 100,
+      downed: false,
+      weapon: "rifle",
+      kills: 0,
+      seen: performance.now(),
+    };
+    this.remotes.set(id, r);
+    this.toast(name + " joined", "good");
+    return r;
+  }
+
+  private dropRemote(id: string) {
+    const r = this.remotes.get(id);
+    if (!r) return;
+    this.scene.remove(r.mesh);
+    r.mesh.traverse((o) => {
+      const mm = o as THREE.Mesh;
+      if (!mm.isMesh) return;
+      mm.geometry?.dispose();
+      const mat = mm.material;
+      if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
+      else mat?.dispose();
+    });
+    this.remotes.delete(id);
+    this.toast(r.name + " left", "info");
+    this.pushState();
+  }
+
+  /** Teammate avatar: deliberately bright and blocky so it never reads as an enemy. */
+  private makeHeroMesh() {
+    const g = new THREE.Group();
+    const suit = new THREE.MeshLambertMaterial({
+      color: 0x4fc3f7,
+      emissive: 0x1b7ea8,
+      emissiveIntensity: 0.35,
+    });
+    const dark = new THREE.MeshLambertMaterial({ color: 0x21384a });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.95, 0.44), suit);
+    torso.position.y = 1.1;
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.36, 0.36), suit);
+    head.position.y = 1.8;
+    const visor = new THREE.Mesh(
+      new THREE.BoxGeometry(0.32, 0.09, 0.04),
+      new THREE.MeshBasicMaterial({ color: 0xeafcff }),
+    );
+    visor.position.set(0, 1.84, -0.2);
+    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.66, 0.22), dark);
+    legL.position.set(-0.19, 0.33, 0);
+    const legR = legL.clone();
+    legR.position.x = 0.19;
+    g.add(torso, head, visor, legL, legR);
+    return g;
+  }
+
+  private updateRemotes(dt: number) {
+    const now = performance.now();
+    for (const [id, r] of [...this.remotes]) {
+      // snapshots arrive a few times a second, so ease between them
+      r.mesh.position.lerp(r.target, Math.min(1, dt * 12));
+      r.mesh.rotation.y = r.yaw;
+      r.mesh.visible = !r.downed || Math.sin(now * 0.012) > 0;
+      if (now - r.seen > 12000) this.dropRemote(id);
+    }
+  }
+
+  private broadcastSelf() {
+    if (this.netStatus.role === "solo") return;
+    const p: NetPlayer = {
+      id: this.net.selfId || "host",
+      name: this.playerName,
+      x: this.pos.x,
+      y: 0,
+      z: this.pos.z,
+      yaw: this.yaw,
+      hp: Math.round(this.hp),
+      maxHp: this.maxHp,
+      downed: this.downed,
+      weapon: this.weapon,
+      kills: this.kills,
+    };
+    this.net.send({ t: "player", p });
+  }
+
   /** Background, fog and sky colour for the active map. */
   private applyTheme() {
     const d = this.mapDef;
@@ -1107,6 +1289,13 @@ export class Game {
     this.updateCamera(dt, active);
     this.renderer.render(this.scene, this.camera);
 
+    this.updateRemotes(dt);
+    this.netTimer -= dt;
+    if (this.netTimer <= 0) {
+      this.netTimer = 0.066; // ~15 Hz is plenty for co-op presence
+      this.broadcastSelf();
+    }
+
     this.hudTimer -= dt;
     if (this.hudTimer <= 0) {
       this.hudTimer = 0.06;
@@ -1602,6 +1791,15 @@ export class Game {
       stamina: Math.round(this.stamina),
       maxStamina: this.maxStamina,
       slag: this.slag,
+      net: this.netStatus,
+      roster: [...this.remotes.values()].map((r) => ({
+        id: r.id,
+        name: r.name,
+        hp: r.hp,
+        maxHp: r.maxHp,
+        downed: r.downed,
+        kills: r.kills,
+      })),
       weapon: this.weapon,
       weaponName: WEAPONS[this.weapon].name,
       weaponNote: WEAPONS[this.weapon].note,
