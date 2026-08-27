@@ -7,6 +7,11 @@ import type { HudState } from "@/game/types";
 const EMPTY: HudState = {
   net: { role: "solo", room: "", connected: false, peers: 0, error: "" },
   roster: [],
+  captures: 0,
+  captureGoal: 3,
+  flagMode: "base",
+  flagHolder: "",
+  flagMine: false,
   phase: "title",
   hurtDir: null,
   hurtDirT: 0,
@@ -95,8 +100,9 @@ export default function DeadlandsGame() {
     };
   }, []);
 
-  const [mapId, setMapId] = useState(MAPS[0].id);
-  const activeMap = MAPS.find((m) => m.id === mapId) ?? MAPS[0];
+  // one arena for now; kept as a lookup so more can be added back later
+  const activeMap = MAPS[0];
+  const mapId = activeMap.id;
 
   const [name, setName] = useState("Hero");
   const [joinCode, setJoinCode] = useState("");
@@ -132,11 +138,6 @@ export default function DeadlandsGame() {
   }, []);
 
   const start = useCallback(() => gameRef.current?.startRun(mapId), [mapId]);
-  // swap the arena immediately so the title screen previews the map behind it
-  const pickMap = useCallback((id: string) => {
-    setMapId(id);
-    gameRef.current?.setMap(id);
-  }, []);
   const resume = useCallback(() => gameRef.current?.resume(), []);
   const restart = useCallback(() => gameRef.current?.restart(), []);
 
@@ -191,6 +192,35 @@ export default function DeadlandsGame() {
               </span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* capture the flag objective */}
+      {playing && (
+        <div className="pointer-events-none absolute left-1/2 top-20 -translate-x-1/2 text-center">
+          <div className="text-display text-sm tracking-widest uppercase">
+            Cores secured{" "}
+            <span className="text-ember">
+              {hud.captures}/{hud.captureGoal}
+            </span>
+          </div>
+          <div
+            className={`text-xs ${
+              hud.flagMine
+                ? "text-ember"
+                : hud.flagMode === "dropped"
+                  ? "text-destructive"
+                  : "text-muted-foreground"
+            }`}
+          >
+            {hud.flagMine
+              ? "You have the core — get it to the blue pad"
+              : hud.flagMode === "carried"
+                ? `${hud.flagHolder} is carrying the core`
+                : hud.flagMode === "dropped"
+                  ? "Core dropped — recover it"
+                  : "Core is at the invader siphon"}
+          </div>
         </div>
       )}
 
@@ -456,27 +486,6 @@ export default function DeadlandsGame() {
             <p className="text-display text-sm tracking-[0.5em] text-ember">{activeMap.tagline}</p>
             <h1 className="text-display text-6xl leading-none md:text-8xl">{activeMap.name}</h1>
             <p className="mx-auto mt-4 max-w-xl text-sm text-muted-foreground">{activeMap.blurb}</p>
-          </div>
-
-          <div className="flex flex-wrap items-stretch justify-center gap-3">
-            {MAPS.map((m) => {
-              const selected = m.id === mapId;
-              return (
-                <button
-                  key={m.id}
-                  onClick={() => pickMap(m.id)}
-                  aria-pressed={selected}
-                  className={`w-52 rounded-md border px-4 py-3 text-left transition-colors ${
-                    selected
-                      ? "border-ember bg-ember/15"
-                      : "border-border bg-card/70 hover:border-ember/60"
-                  }`}
-                >
-                  <span className="text-display block text-base">{m.name}</span>
-                  <span className="block text-xs text-muted-foreground">{m.tagline}</span>
-                </button>
-              );
-            })}
           </div>
 
           <div className="w-[min(560px,92vw)] rounded-md border border-border bg-card/70 p-4">

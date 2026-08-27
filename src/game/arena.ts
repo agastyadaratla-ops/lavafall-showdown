@@ -40,36 +40,21 @@ function hazardTexture(ramp: HazardRamp, repeat: [number, number]): THREE.Textur
   return t;
 }
 
-/** A fossil ribcage: spine plus rib arcs. Reads as cover at silhouette distance. */
-function ribcage(mat: THREE.Material): THREE.Group {
+/** A downtown block: dark slab with a neon trim line so it reads at distance. */
+function cityBlock(mat: THREE.Material, accent: number): THREE.Group {
   const g = new THREE.Group();
-  const spine = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 5.2, 6), mat);
-  spine.rotation.z = Math.PI / 2;
-  spine.position.y = 2.1;
-  g.add(spine);
-  for (let i = 0; i < 5; i++) {
-    const s = 1.15 + Math.sin(i * 0.9) * 0.35;
-    const rib = new THREE.Mesh(new THREE.TorusGeometry(s, 0.12, 5, 12, Math.PI * 1.05), mat);
-    rib.position.set(-2 + i * 1.1, 2.05, 0);
-    rib.rotation.y = Math.PI / 2;
-    rib.rotation.z = Math.PI;
-    g.add(rib);
-  }
-  return g;
-}
-
-/** A single weathered long bone lying in the ferns. */
-function longBone(mat: THREE.Material): THREE.Group {
-  const g = new THREE.Group();
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 3.4, 6), mat);
-  shaft.rotation.z = Math.PI / 2;
-  g.add(shaft);
-  for (const s of [-1, 1]) {
-    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.42, 7, 6), mat);
-    knob.position.x = s * 1.7;
-    g.add(knob);
-  }
-  g.position.y = 0.42;
+  const h = 2.4 + Math.random() * 4.5;
+  const w = 2.2 + Math.random() * 2.6;
+  const d = 2.2 + Math.random() * 2.6;
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  slab.position.y = h / 2;
+  g.add(slab);
+  const trim = new THREE.Mesh(
+    new THREE.BoxGeometry(w * 1.02, 0.12, d * 1.02),
+    new THREE.MeshBasicMaterial({ color: accent, fog: false, toneMapped: false }),
+  );
+  trim.position.y = h * (0.55 + Math.random() * 0.3);
+  g.add(trim);
   return g;
 }
 
@@ -147,11 +132,23 @@ export class Arena {
     const ringCount = Math.round(40 * LAYOUT_SCALE);
     for (let i = 0; i < ringCount; i++) {
       const a = (i / ringCount) * Math.PI * 2;
-      const h = 4 + Math.random() * 4;
-      const rock = new THREE.Mesh(new THREE.BoxGeometry(4 + Math.random() * 3, h, 3), rimMat);
-      rock.position.set(Math.cos(a) * (ARENA_R + 1.6), h / 2 - 0.4, Math.sin(a) * (ARENA_R + 1.6));
-      rock.rotation.y = a + Math.random() * 0.5;
-      g.add(rock);
+      // a ring of towers, tall enough to feel like downtown rather than a wall
+      const h = 12 + Math.random() * 26;
+      const tower = new THREE.Mesh(new THREE.BoxGeometry(5 + Math.random() * 4, h, 5), rimMat);
+      tower.position.set(Math.cos(a) * (ARENA_R + 3), h / 2 - 0.4, Math.sin(a) * (ARENA_R + 3));
+      tower.rotation.y = a + Math.random() * 0.5;
+      g.add(tower);
+      // lit floors: a couple of neon bands per tower
+      for (let b = 0; b < 2; b++) {
+        const band = new THREE.Mesh(
+          new THREE.BoxGeometry(5.2 + Math.random() * 4, 0.3, 5.2),
+          new THREE.MeshBasicMaterial({ color: def.accent, fog: false, toneMapped: false }),
+        );
+        band.position.copy(tower.position);
+        band.position.y = h * (0.3 + Math.random() * 0.55);
+        band.rotation.y = tower.rotation.y;
+        g.add(band);
+      }
     }
 
     // scattered cover silhouettes
@@ -162,8 +159,8 @@ export class Arena {
       const z = Math.sin(a) * r;
       if (Math.abs(z) < this.half + 2) continue;
       const x = Math.cos(a) * r;
-      if (def.props === "bones") {
-        const prop = Math.random() < 0.45 ? ribcage(propMat) : longBone(propMat);
+      if (def.props === "blocks") {
+        const prop = cityBlock(propMat, def.accent);
         prop.position.x = x;
         prop.position.z = z;
         prop.rotation.y = Math.random() * Math.PI * 2;
@@ -176,6 +173,38 @@ export class Arena {
         g.add(b);
       }
     }
+
+    // capture pads: hero delivery point and the invader siphon
+    const pad = (at: [number, number], color: number, tall: boolean) => {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(2.6, 3.6, 28),
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: 0.55,
+          side: THREE.DoubleSide,
+          fog: false,
+          toneMapped: false,
+        }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(at[0], 0.05, at[1]);
+      g.add(ring);
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(tall ? 1.1 : 0.35, tall ? 1.6 : 0.35, tall ? 9 : 3, 10),
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: tall ? 0.3 : 0.5,
+          fog: false,
+          toneMapped: false,
+        }),
+      );
+      post.position.set(at[0], tall ? 4.5 : 1.5, at[1]);
+      g.add(post);
+    };
+    pad(def.heroBase, 0x4fc3f7, false);
+    pad(def.alienBase, 0xff5ad8, true);
 
     // vents
     const spots = def.vents.map(

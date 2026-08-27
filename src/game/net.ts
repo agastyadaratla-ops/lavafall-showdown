@@ -39,8 +39,18 @@ export interface NetEnemy {
   x: number;
   y: number;
   z: number;
+  /** mesh yaw */
   r: number;
   a: boolean;
+}
+
+/** Flag state, owned by the host. */
+export interface NetFlag {
+  mode: "base" | "carried" | "dropped";
+  carrier: string;
+  x: number;
+  z: number;
+  ret: number;
 }
 
 export type NetMessage =
@@ -48,7 +58,13 @@ export type NetMessage =
   | { t: "roster"; players: NetPlayer[] }
   | { t: "player"; p: NetPlayer }
   | { t: "leave"; id: string }
-  | { t: "world"; wave: number; phase: string; enemies: NetEnemy[] }
+  | {
+      t: "world";
+      wave: number;
+      enemies: NetEnemy[];
+      flag: NetFlag;
+      captures: number;
+    }
   | { t: "damage"; i: number; dmg: number; from: string }
   | { t: "start"; mapId: string };
 

@@ -25,7 +25,7 @@ export interface EnemyDef {
 
 export const ENEMIES = {
   harasser: {
-    name: "Flanker",
+    name: "Scrapper",
     behavior: "rusher",
     hp: 46,
     speed: 4.7,
@@ -35,13 +35,13 @@ export const ENEMIES = {
     scale: 0.95,
     bounty: 0,
     downTime: 1.8,
-    eye: 0xff4020,
+    eye: 0xff5533,
     minWave: 1,
     weight: 100,
     waveGain: -3,
   },
   spitter: {
-    name: "Spitter",
+    name: "Arc Drone",
     behavior: "ranged",
     hp: 72,
     speed: 2.7,
@@ -57,7 +57,7 @@ export const ENEMIES = {
     waveGain: 3,
   },
   heavy: {
-    name: "Charger",
+    name: "Sentinel",
     behavior: "charger",
     hp: 240,
     speed: 2.1,
@@ -73,7 +73,7 @@ export const ENEMIES = {
     waveGain: 2.5,
   },
   swarmling: {
-    name: "Swarmling",
+    name: "Nanite",
     behavior: "rusher",
     hp: 22,
     speed: 6.6,
@@ -89,7 +89,7 @@ export const ENEMIES = {
     waveGain: 7,
   },
   spinespitter: {
-    name: "Spinespitter",
+    name: "Pulse Drone",
     behavior: "ranged",
     hp: 58,
     speed: 3.4,
@@ -105,7 +105,7 @@ export const ENEMIES = {
     waveGain: 3.5,
   },
   brute: {
-    name: "Brute",
+    name: "Colossus",
     behavior: "charger",
     hp: 520,
     speed: 1.7,

@@ -34,6 +34,11 @@ export interface RosterEntry {
 
 export interface HudState {
   net: NetStatus;
+  captures: number;
+  captureGoal: number;
+  flagMode: "base" | "carried" | "dropped";
+  flagHolder: string;
+  flagMine: boolean;
   roster: RosterEntry[];
   phase: Phase;
   /** screen-relative bearing of the last damage source (radians, 0 = ahead), null for burns */

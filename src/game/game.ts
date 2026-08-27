@@ -2,7 +2,14 @@ import * as THREE from "three";
 import { Arena, ARENA_R } from "./arena";
 import { ENEMIES, pickEnemy, type EnemyBehavior, type EnemyKind } from "./enemies";
 import { getMap, type MapDef } from "./maps";
-import { NetSession, type NetMessage, type NetPlayer, type NetStatus } from "./net";
+import {
+  NetSession,
+  type NetEnemy,
+  type NetFlag,
+  type NetMessage,
+  type NetPlayer,
+  type NetStatus,
+} from "./net";
 import { WEAPONS, WEAPON_IDS, WEAPONS_BY_SLOT, type WeaponId } from "./weapons";
 import { Sfx } from "./audio";
 import { BUFFS, UPGRADES } from "./upgrades";
@@ -28,6 +35,10 @@ interface Remote {
 interface Enemy {
   kind: EnemyKind;
   behavior: EnemyBehavior;
+  /** stable id across the wire; assigned by whoever is hosting */
+  nid: number;
+  /** clients ease the mesh toward the last snapshot rather than simulating */
+  netTarget: THREE.Vector3;
   mesh: THREE.Group;
   mats: THREE.MeshLambertMaterial[];
   baseColor: number;
@@ -190,6 +201,16 @@ export class Game {
     error: "",
   };
   private playerName = "Hero";
+  private nextNid = 0;
+  /** clients only: nid -> enemy, for reconciling snapshots */
+  private netEnemies = new Map<number, Enemy>();
+  private worldTimer = 0;
+
+  // ---- capture the flag
+  private flag: NetFlag = { mode: "base", carrier: "", x: 0, z: 0, ret: 0 };
+  private flagMesh: THREE.Mesh | null = null;
+  private captures = 0;
+  private captureGoal = 3;
 
   constructor(canvas: HTMLCanvasElement, onState: (s: HudState) => void) {
     this.canvas = canvas;
@@ -221,6 +242,7 @@ export class Game {
       },
     });
 
+    this.buildFlag();
     this.buildViewmodel();
     this.camera.add(this.viewmodel);
     this.scene.add(this.camera);
@@ -342,6 +364,17 @@ export class Game {
       r.seen = performance.now();
       return;
     }
+    if (m.t === "world") {
+      if (!this.isHost) this.applyWorld(m);
+      return;
+    }
+    if (m.t === "damage") {
+      // clients report their hits; the host is the one that actually applies them
+      if (!this.isHost) return;
+      const e = this.enemies.find((x) => x.nid === m.i);
+      if (e && e.alive) this.damageEnemy(e, m.dmg, 0, new THREE.Vector3(0, 0, 0), false);
+      return;
+    }
     if (m.t === "leave") this.dropRemote(m.id);
   }
 
@@ -438,6 +471,191 @@ export class Game {
       kills: this.kills,
     };
     this.net.send({ t: "player", p });
+  }
+
+  // ---------------------------------------------------------------- authority
+  /** Solo players host their own world; only a joined client defers. */
+  private get isHost() {
+    return this.netStatus.role !== "client";
+  }
+
+  private get selfNetId() {
+    return this.net.selfId || "host";
+  }
+
+  // ---------------------------------------------------------------- capture the flag
+  private buildFlag() {
+    const mesh = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.75, 0),
+      new THREE.MeshBasicMaterial({ color: 0x7df9ff, fog: false, toneMapped: false }),
+    );
+    this.flagMesh = mesh;
+    this.scene.add(mesh);
+    this.resetFlag();
+  }
+
+  private resetFlag() {
+    const [ax, az] = this.mapDef.alienBase;
+    this.flag = { mode: "base", carrier: "", x: ax, z: az, ret: 0 };
+  }
+
+  /** Every player position the host knows about, including its own. */
+  private allPositions(): Array<{ id: string; x: number; z: number; downed: boolean }> {
+    const out = [{ id: this.selfNetId, x: this.pos.x, z: this.pos.z, downed: this.downed }];
+    for (const r of this.remotes.values()) {
+      out.push({ id: r.id, x: r.target.x, z: r.target.z, downed: r.downed });
+    }
+    return out;
+  }
+
+  private carrierPos() {
+    if (this.flag.carrier === this.selfNetId) return { x: this.pos.x, z: this.pos.z };
+    const r = this.remotes.get(this.flag.carrier);
+    return r ? { x: r.target.x, z: r.target.z } : null;
+  }
+
+  private carrierName() {
+    if (this.flag.carrier === this.selfNetId) return this.playerName;
+    return this.remotes.get(this.flag.carrier)?.name ?? "";
+  }
+
+  private updateFlag(dt: number) {
+    if (this.isHost) {
+      const [hx, hz] = this.mapDef.heroBase;
+      const [ax, az] = this.mapDef.alienBase;
+
+      if (this.flag.mode === "carried") {
+        const c = this.carrierPos();
+        const carrier =
+          this.flag.carrier === this.selfNetId
+            ? { downed: this.downed }
+            : this.remotes.get(this.flag.carrier);
+        if (!c || !carrier || carrier.downed) {
+          // dropped where they fell, and it walks itself home if nobody recovers it
+          this.flag.mode = "dropped";
+          this.flag.ret = 20;
+          this.flag.carrier = "";
+          if (c) {
+            this.flag.x = c.x;
+            this.flag.z = c.z;
+          }
+          this.toast("Core dropped!", "bad");
+        } else {
+          this.flag.x = c.x;
+          this.flag.z = c.z;
+          if (Math.hypot(c.x - hx, c.z - hz) < 3.5) {
+            this.captures++;
+            this.addSlag(120);
+            this.resetFlag();
+            this.toast(`Core secured! ${this.captures}/${this.captureGoal}`, "good");
+            this.sfx.play("buff");
+          }
+        }
+      } else {
+        if (this.flag.mode === "base") {
+          this.flag.x = ax;
+          this.flag.z = az;
+        } else {
+          this.flag.ret -= dt;
+          if (this.flag.ret <= 0) {
+            this.resetFlag();
+            this.toast("Core reclaimed by the invaders", "bad");
+          }
+        }
+        for (const p of this.allPositions()) {
+          if (p.downed) continue;
+          if (Math.hypot(p.x - this.flag.x, p.z - this.flag.z) < 2.6) {
+            this.flag.mode = "carried";
+            this.flag.carrier = p.id;
+            this.toast(
+              p.id === this.selfNetId ? "You have the core - run it home!" : "Ally has the core",
+              "good",
+            );
+            break;
+          }
+        }
+      }
+    }
+
+    if (this.flagMesh) {
+      const bob = Math.sin(performance.now() * 0.004) * 0.25;
+      const lift = this.flag.mode === "carried" ? 2.35 : 1.3;
+      this.flagMesh.position.set(this.flag.x, lift + bob, this.flag.z);
+      this.flagMesh.rotation.y += dt * 1.6;
+    }
+  }
+
+  // ---------------------------------------------------------------- world sync
+  private broadcastWorld() {
+    if (!this.isHost || this.netStatus.role === "solo") return;
+    const list: NetEnemy[] = [];
+    for (const e of this.enemies) {
+      list.push({
+        i: e.nid,
+        k: e.kind,
+        x: +e.mesh.position.x.toFixed(2),
+        y: +e.mesh.position.y.toFixed(2),
+        z: +e.mesh.position.z.toFixed(2),
+        r: +e.mesh.rotation.y.toFixed(2),
+        a: e.alive,
+      });
+    }
+    this.net.send({
+      t: "world",
+      wave: this.wave,
+      enemies: list,
+      flag: this.flag,
+      captures: this.captures,
+    });
+  }
+
+  /** Clients rebuild the enemy list from the host snapshot. */
+  private applyWorld(m: Extract<NetMessage, { t: "world" }>) {
+    this.wave = m.wave;
+    this.captures = m.captures;
+    this.flag = m.flag;
+
+    const seen = new Set<number>();
+    for (const ne of m.enemies) {
+      seen.add(ne.i);
+      let e = this.netEnemies.get(ne.i);
+      if (!e) {
+        e = this.makeEnemy(ne.k as EnemyKind);
+        e.nid = ne.i;
+        e.mesh.position.set(ne.x, ne.y, ne.z);
+        this.scene.add(e.mesh);
+        this.enemies.push(e);
+        this.netEnemies.set(ne.i, e);
+      }
+      e.netTarget.set(ne.x, ne.y, ne.z);
+      e.mesh.rotation.y = ne.r;
+      if (e.alive && !ne.a) e.mesh.rotation.z = Math.PI / 2.2;
+      e.alive = ne.a;
+    }
+    for (const [nid, e] of [...this.netEnemies]) {
+      if (seen.has(nid)) continue;
+      this.scene.remove(e.mesh);
+      this.netEnemies.delete(nid);
+      const i = this.enemies.indexOf(e);
+      if (i >= 0) this.enemies.splice(i, 1);
+    }
+  }
+
+  /**
+   * Client-side enemy update: positions come from the host, but each client still
+   * resolves damage to itself so its own health stays responsive under latency.
+   */
+  private followSnapshot(dt: number) {
+    for (const e of this.enemies) {
+      e.mesh.position.lerp(e.netTarget, Math.min(1, dt * 14));
+      if (!e.alive || this.downed) continue;
+      e.attackCd -= dt;
+      const d = Math.hypot(e.mesh.position.x - this.pos.x, e.mesh.position.z - this.pos.z);
+      if (d < 1.7 + e.radius && e.attackCd <= 0) {
+        e.attackCd = 1.0;
+        this.hurt(e.damage, "hit", e.mesh.position.x, e.mesh.position.z);
+      }
+    }
   }
 
   /** Background, fog and sky colour for the active map. */
@@ -605,6 +823,8 @@ export class Game {
     this.kills = 0;
     this.combo = 0;
     this.magBonus = 0;
+    this.captures = 0;
+    this.resetFlag();
     this.ammo = this.freshAmmo();
     this.adrenaline = 1;
     this.downed = false;
@@ -899,6 +1119,7 @@ export class Game {
         if (this.buffs.has("hollowpoint") && Math.random() < 0.2) crit = true;
         if (crit) dmg *= 3;
         this.damageEnemy(target, dmg, w.stun, dir, crit);
+        if (!this.isHost) this.net.send({ t: "damage", i: target.nid, dmg, from: this.selfNetId });
       } else {
         hitPoint = this.pos.clone().addScaledVector(dir, Math.min(60, w.range));
       }
@@ -986,7 +1207,7 @@ export class Game {
     e.flash = 0.12;
     this.hitFlash = crit ? 1 : 0.7;
     this.sfx.play("hitmark");
-    this.blood(e.mesh.position.x, e.mesh.position.y + e.height * 0.6, e.mesh.position.z, crit ? 14 : 7);
+    this.sparks(e.mesh.position.x, e.mesh.position.y + e.height * 0.6, e.mesh.position.z, crit ? 14 : 7);
     const kb = source === "tackle" ? 16 : source === "melee" ? 4.5 : 1.4;
     e.vx += dir.x * kb;
     e.vz += dir.z * kb;
@@ -1015,7 +1236,7 @@ export class Game {
     this.combo++;
     this.comboTimer = 3;
     this.sfx.play("kill");
-    this.blood(e.mesh.position.x, e.mesh.position.y + 0.6, e.mesh.position.z, 16);
+    this.sparks(e.mesh.position.x, e.mesh.position.y + 0.6, e.mesh.position.z, 16);
     let reward = 8 + this.wave * 2 + ENEMIES[e.kind].bounty;
     if (source === "lava" || source === "geyser") {
       reward += 25;
@@ -1136,6 +1357,8 @@ export class Game {
     return {
       kind,
       behavior: b.behavior,
+      nid: ++this.nextNid,
+      netTarget: new THREE.Vector3(),
       mesh: group,
       mats,
       baseColor: color,
@@ -1229,8 +1452,9 @@ export class Game {
     }
   }
 
-  private blood(x: number, y: number, z: number, n: number) {
-    this.emit(x, y, z, n, [0.65, 0.05, 0.06], 5, 3.5);
+  /** Machines shed sparks and coolant, never blood. */
+  private sparks(x: number, y: number, z: number, n: number) {
+    this.emit(x, y, z, n, [0.42, 0.86, 1], 5, 3.5);
   }
 
   private fireBurst(x: number, z: number) {
@@ -1295,6 +1519,11 @@ export class Game {
       this.netTimer = 0.066; // ~15 Hz is plenty for co-op presence
       this.broadcastSelf();
     }
+    this.worldTimer -= dt;
+    if (this.worldTimer <= 0) {
+      this.worldTimer = 0.1; // enemy snapshots are the heavy payload, so a little slower
+      this.broadcastWorld();
+    }
 
     this.hudTimer -= dt;
     if (this.hudTimer <= 0) {
@@ -1306,16 +1535,23 @@ export class Game {
   private step(dt: number) {
     this.arena.update(dt);
     this.updatePlayer(dt);
-    if (this.phase === "playing") this.updateSpawning(dt);
-    this.updateEnemies(dt);
-    this.updateProjectiles(dt);
+
+    if (this.isHost) {
+      // the host owns spawning, enemy AI, projectiles and wave flow
+      if (this.phase === "playing") this.updateSpawning(dt);
+      this.updateEnemies(dt);
+      this.updateProjectiles(dt);
+      if (this.phase === "respite") {
+        this.respiteLeft -= dt;
+        if (this.respiteLeft <= 0) this.startWave(this.wave + 1);
+      }
+    } else {
+      this.followSnapshot(dt);
+    }
+
+    this.updateFlag(dt);
     this.updatePickups(dt);
     this.updateFx(dt);
-
-    if (this.phase === "respite") {
-      this.respiteLeft -= dt;
-      if (this.respiteLeft <= 0) this.startWave(this.wave + 1);
-    }
   }
 
   private updateSpawning(dt: number) {
@@ -1792,6 +2028,11 @@ export class Game {
       maxStamina: this.maxStamina,
       slag: this.slag,
       net: this.netStatus,
+      captures: this.captures,
+      captureGoal: this.captureGoal,
+      flagMode: this.flag.mode,
+      flagHolder: this.flag.mode === "carried" ? this.carrierName() : "",
+      flagMine: this.flag.carrier === this.selfNetId,
       roster: [...this.remotes.values()].map((r) => ({
         id: r.id,
         name: r.name,

@@ -7,17 +7,17 @@ const DeadlandsGame = lazy(() => import("@/components/game/DeadlandsGame"));
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "The Deadlands — Volcanic Horde Survival Shooter" },
+      { title: "Neo Kestrel - Co-op Capture the Core" },
       {
         name: "description",
         content:
-          "Survive endless waves in a lava-split crater: ammo-limited rifle, infinite machete, stamina tackles and hazard kills. Play free in your browser.",
+          "Team up against the alien machines occupying Neo Kestrel. Take back the core, run it home, and hold the line downtown. Free peer-to-peer co-op in your browser.",
       },
-      { property: "og:title", content: "The Deadlands — Volcanic Horde Survival Shooter" },
+      { property: "og:title", content: "Neo Kestrel - Co-op Capture the Core" },
       {
         property: "og:description",
         content:
-          "Endless waves, lava hazards, staggers and tackles. A browser-playable 3D horde survival prototype.",
+          "Team up against the alien machines occupying Neo Kestrel. Take back the core, run it home, and hold the line downtown. Free peer-to-peer co-op in your browser.",
       },
     ],
   }),
@@ -27,9 +27,9 @@ export const Route = createFileRoute("/")({
 function Index() {
   return (
     <main className="h-screen w-screen bg-background">
-      <h1 className="sr-only">The Deadlands — volcanic horde survival shooter</h1>
-      <ClientOnly fallback={<div className="flex h-screen items-center justify-center text-display">Loading the crater…</div>}>
-        <Suspense fallback={<div className="flex h-screen items-center justify-center text-display">Loading the crater…</div>}>
+      <h1 className="sr-only">Neo Kestrel - co-op capture the core</h1>
+      <ClientOnly fallback={<div className="flex h-screen items-center justify-center text-display">Loading Neo Kestrel…</div>}>
+        <Suspense fallback={<div className="flex h-screen items-center justify-center text-display">Loading Neo Kestrel…</div>}>
           <DeadlandsGame />
         </Suspense>
       </ClientOnly>
