@@ -1,13 +1,16 @@
 import * as THREE from "three";
 import { Arena, ARENA_R } from "./arena";
+import { ENEMIES, pickEnemy, type EnemyBehavior, type EnemyKind } from "./enemies";
 import { getMap, type MapDef } from "./maps";
+import { WEAPONS, WEAPON_IDS, WEAPONS_BY_SLOT, type WeaponId } from "./weapons";
 import { Sfx } from "./audio";
 import { BUFFS, UPGRADES } from "./upgrades";
-import type { BuffCard, EnemyKind, HudState, Phase, ShopItem, Toast } from "./types";
+import type { BuffCard, HudState, Phase, ShopItem, Toast } from "./types";
 
 
 interface Enemy {
   kind: EnemyKind;
+  behavior: EnemyBehavior;
   mesh: THREE.Group;
   mats: THREE.MeshLambertMaterial[];
   baseColor: number;
@@ -80,11 +83,11 @@ export class Game {
   private kills = 0;
   private combo = 0;
   private comboTimer = 0;
-  private weapon: "rifle" | "machete" = "rifle";
-  private mag = 30;
-  private magSize = 30;
-  private reserve = 150;
-  private reserveMax = 240;
+  private weapon: WeaponId = "rifle";
+  /** every gun keeps its own mag and reserve */
+  private ammo = {} as Record<WeaponId, { mag: number; reserve: number }>;
+  /** flat mag capacity added by the "mag" upgrade, applied to every gun */
+  private magBonus = 0;
   private reloadT = 0;
   private fireCd = 0;
   private swingT = 0;
@@ -135,8 +138,8 @@ export class Game {
   private bobT = 0;
   private muzzle: THREE.PointLight;
   private viewmodel = new THREE.Group();
-  private rifleModel = new THREE.Group();
-  private macheteModel = new THREE.Group();
+  /** one viewmodel per weapon; only the equipped one is visible */
+  private weaponModels = {} as Record<WeaponId, THREE.Group>;
   private tracers: THREE.Line[] = [];
   private particles: {
     points: THREE.Points;
@@ -419,9 +422,8 @@ export class Game {
     this.slag = 0;
     this.kills = 0;
     this.combo = 0;
-    this.magSize = 30;
-    this.mag = 30;
-    this.reserve = 150;
+    this.magBonus = 0;
+    this.ammo = this.freshAmmo();
     this.adrenaline = 1;
     this.downed = false;
     this.bleed = 0;
@@ -438,8 +440,8 @@ export class Game {
   private applyUpgrade(id: string) {
     switch (id) {
       case "mag":
-        this.magSize += 10;
-        this.mag = this.magSize;
+        this.magBonus += 10;
+        for (const id of WEAPON_IDS) this.ammo[id].mag = this.magCap(id);
         break;
       case "armor":
         this.maxHp += 25;
@@ -450,7 +452,7 @@ export class Game {
         this.stamina = this.maxStamina;
         break;
       case "ammo":
-        this.reserve = this.reserveMax;
+        for (const id of WEAPON_IDS) this.ammo[id].reserve = WEAPONS[id].reserveMax;
         break;
       case "adrenaline":
         this.adrenaline += 1;
@@ -467,11 +469,7 @@ export class Game {
     this.spawnQueue = [];
     const count = Math.min(60, 6 + Math.round(w * 2.2));
     for (let i = 0; i < count; i++) {
-      const r = Math.random();
-      let kind: EnemyKind = "harasser";
-      if (w >= 3 && r < Math.min(0.28, 0.06 + w * 0.02)) kind = "heavy";
-      else if (w >= 2 && r < Math.min(0.55, 0.2 + w * 0.02)) kind = "spitter";
-      this.spawnQueue.push(kind);
+      this.spawnQueue.push(pickEnemy(w));
     }
     this.waveTotal = count;
     this.spawnTimer = 0.6;
@@ -523,9 +521,10 @@ export class Game {
       return;
     }
     if (this.phase !== "playing" && this.phase !== "respite") return;
-    if (e.code === "Digit1") this.weapon = "rifle";
-    if (e.code === "Digit2") this.weapon = "machete";
-    if (e.code === "KeyQ") this.weapon = this.weapon === "rifle" ? "machete" : "rifle";
+    for (const id of WEAPONS_BY_SLOT) {
+      if (e.code === `Digit${WEAPONS[id].slot}`) this.weapon = id;
+    }
+    if (e.code === "KeyQ") this.cycleWeapon(1);
     if (e.code === "KeyR") this.startReload();
     if (e.code === "Space") {
       e.preventDefault();
@@ -566,7 +565,7 @@ export class Game {
   };
 
   private onWheel = () => {
-    this.weapon = this.weapon === "rifle" ? "machete" : "rifle";
+    this.cycleWeapon(1);
   };
 
   private onLockChange = () => {
@@ -590,95 +589,140 @@ export class Game {
   };
 
   // ---------------------------------------------------------------- viewmodel
+  /** Full ammo for every weapon, used on a fresh run. */
+  private freshAmmo() {
+    const out = {} as Record<WeaponId, { mag: number; reserve: number }>;
+    for (const id of WEAPON_IDS) {
+      out[id] = { mag: WEAPONS[id].magSize, reserve: Math.round(WEAPONS[id].reserveMax * 0.62) };
+    }
+    return out;
+  }
+
+  private magCap(id: WeaponId) {
+    return WEAPONS[id].kind === "gun" ? WEAPONS[id].magSize + this.magBonus : 0;
+  }
+
   private buildViewmodel() {
-    const metal = new THREE.MeshLambertMaterial({ color: 0x2c2c30 });
     const dark = new THREE.MeshLambertMaterial({ color: 0x171719 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.75), metal);
-    body.position.set(0, -0.02, -0.35);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.5, 8), dark);
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.02, -0.82);
-    const magm = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.24, 0.14), dark);
-    magm.position.set(0, -0.18, -0.28);
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.13, 0.3), dark);
-    stock.position.set(0, -0.05, 0.12);
-    this.rifleModel.add(body, barrel, magm, stock);
-    this.rifleModel.position.set(0.28, -0.26, -0.15);
 
-    const blade = new THREE.Mesh(
-      new THREE.BoxGeometry(0.06, 0.5, 0.11),
-      new THREE.MeshLambertMaterial({ color: 0xb9c0c6 }),
-    );
-    blade.position.set(0, 0.28, -0.2);
-    blade.rotation.x = -0.5;
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.2, 0.08), dark);
-    this.macheteModel.add(blade, grip);
-    this.macheteModel.position.set(0.34, -0.34, -0.35);
-    this.macheteModel.rotation.z = -0.25;
-    this.macheteModel.visible = false;
+    for (const id of WEAPON_IDS) {
+      const w = WEAPONS[id];
+      const g = new THREE.Group();
 
-    this.viewmodel.add(this.rifleModel, this.macheteModel);
+      if (w.kind === "melee") {
+        const blade = new THREE.Mesh(
+          new THREE.BoxGeometry(w.model.body[0], w.model.body[1], w.model.body[2]),
+          new THREE.MeshLambertMaterial({ color: w.model.color }),
+        );
+        blade.position.set(0, 0.28, -0.2);
+        blade.rotation.x = -0.5;
+        const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.2, 0.08), dark);
+        g.add(blade, grip);
+        g.position.set(0.34, -0.34, -0.35);
+        g.rotation.z = -0.25;
+      } else {
+        const metal = new THREE.MeshLambertMaterial({ color: w.model.color });
+        const [bw, bh, bl] = w.model.body;
+        const body = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bl), metal);
+        body.position.set(0, -0.02, -bl / 2);
+        const [br, blen] = w.model.barrel;
+        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(br, br, blen, 8), dark);
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(0, 0.02, -bl - blen / 2 + 0.1);
+        const magm = new THREE.Mesh(new THREE.BoxGeometry(bw * 0.75, 0.24, 0.14), dark);
+        magm.position.set(0, -0.18, -bl * 0.38);
+        const stock = new THREE.Mesh(new THREE.BoxGeometry(bw * 0.85, 0.13, 0.3), dark);
+        stock.position.set(0, -0.05, 0.12);
+        g.add(body, barrel, magm, stock);
+        g.position.set(0.28, -0.26, -0.15);
+      }
+
+      g.visible = id === this.weapon;
+      this.weaponModels[id] = g;
+      this.viewmodel.add(g);
+    }
   }
 
   // ---------------------------------------------------------------- combat
+  private cycleWeapon(dir: number) {
+    const i = WEAPONS_BY_SLOT.indexOf(this.weapon);
+    const n = WEAPONS_BY_SLOT.length;
+    this.weapon = WEAPONS_BY_SLOT[(i + dir + n) % n];
+  }
+
   private startReload() {
-    if (this.weapon !== "rifle" || this.reloadT > 0) return;
-    if (this.mag >= this.magSize || this.reserve <= 0) return;
-    this.reloadT = Math.max(0.55, 1.7 * Math.pow(0.85, this.lvl("reload")));
+    const w = WEAPONS[this.weapon];
+    if (w.kind !== "gun" || this.reloadT > 0) return;
+    const slot = this.ammo[this.weapon];
+    if (slot.mag >= this.magCap(this.weapon) || slot.reserve <= 0) return;
+    this.reloadT = Math.max(0.55, w.reloadTime * Math.pow(0.85, this.lvl("reload")));
     this.sfx.play("reload");
   }
 
-  private fireRifle() {
+  private fireGun() {
+    const w = WEAPONS[this.weapon];
+    if (w.kind !== "gun") return;
     if (this.reloadT > 0 || this.fireCd > 0 || this.downed || this.tackleT > 0) return;
-    if (this.mag <= 0) {
+    const slot = this.ammo[this.weapon];
+    if (slot.mag <= 0) {
       this.sfx.play("dry");
       this.fireCd = 0.25;
       this.startReload();
       return;
     }
-    this.mag--;
-    this.fireCd = 0.115 * Math.pow(0.89, this.lvl("rof"));
+    slot.mag--;
+    this.fireCd = w.fireCd * Math.pow(0.89, this.lvl("rof"));
     this.sfx.play("shot");
-    this.recoil = 1;
-    this.shake = Math.min(1, this.shake + 0.16);
+    this.recoil = w.recoil;
+    this.shake = Math.min(1.2, this.shake + w.shake);
     this.muzzle.intensity = 5;
     this.muzzle.position.copy(this.pos);
 
-    const dir = this.lookDir();
-    const spread = (this.isSprinting() ? 0.035 : 0.011) + (this.mouseDown ? 0.006 : 0);
-    dir.x += (Math.random() - 0.5) * spread;
-    dir.y += (Math.random() - 0.5) * spread;
-    dir.z += (Math.random() - 0.5) * spread;
-    dir.normalize();
-
-    const dmgBase = 18 + 6 * this.lvl("damage");
-    let hitPoint: THREE.Vector3 | null = null;
-    let target: Enemy | null = null;
-    let bestT = 120;
+    const spread = (this.isSprinting() ? w.sprintSpread : w.spread) + (this.mouseDown ? 0.006 : 0);
+    // the damage upgrade scaled the rifle by +6 per level on an 18 base; keep that
+    // proportion so every weapon benefits equally rather than favouring the rifle
+    const perPellet = w.damage * (1 + 0.33 * this.lvl("damage"));
     const rel = new THREE.Vector3();
-    for (const e of this.enemies) {
-      if (!e.alive) continue;
-      rel.set(e.mesh.position.x - this.pos.x, e.mesh.position.y + e.height * 0.5 - this.pos.y, e.mesh.position.z - this.pos.z);
-      const t = rel.dot(dir);
-      if (t < 0 || t > bestT) continue;
-      const perp = rel.clone().addScaledVector(dir, -t).length();
-      if (perp > e.radius + 0.25) continue;
-      bestT = t;
-      target = e;
+
+    for (let p = 0; p < w.pellets; p++) {
+      const dir = this.lookDir();
+      if (spread > 0) {
+        dir.x += (Math.random() - 0.5) * spread;
+        dir.y += (Math.random() - 0.5) * spread;
+        dir.z += (Math.random() - 0.5) * spread;
+        dir.normalize();
+      }
+      let target: Enemy | null = null;
+      let bestT = w.range;
+      for (const e of this.enemies) {
+        if (!e.alive) continue;
+        rel.set(
+          e.mesh.position.x - this.pos.x,
+          e.mesh.position.y + e.height * 0.5 - this.pos.y,
+          e.mesh.position.z - this.pos.z,
+        );
+        const t = rel.dot(dir);
+        if (t < 0 || t > bestT) continue;
+        const perp = rel.clone().addScaledVector(dir, -t).length();
+        if (perp > e.radius + 0.25) continue;
+        bestT = t;
+        target = e;
+      }
+      let hitPoint: THREE.Vector3;
+      if (target) {
+        hitPoint = this.pos.clone().addScaledVector(dir, bestT);
+        const headY = target.mesh.position.y + target.height * 0.82;
+        let dmg = perPellet;
+        let crit = hitPoint.y > headY;
+        if (this.buffs.has("hollowpoint") && Math.random() < 0.2) crit = true;
+        if (crit) dmg *= 3;
+        this.damageEnemy(target, dmg, w.stun, dir, crit);
+      } else {
+        hitPoint = this.pos.clone().addScaledVector(dir, Math.min(60, w.range));
+      }
+      this.tracer(this.pos.clone().addScaledVector(dir, 1.2), hitPoint);
     }
-    if (target) {
-      hitPoint = this.pos.clone().addScaledVector(dir, bestT);
-      const headY = target.mesh.position.y + target.height * 0.82;
-      let dmg = dmgBase;
-      let crit = hitPoint.y > headY;
-      if (this.buffs.has("hollowpoint") && Math.random() < 0.2) crit = true;
-      if (crit) dmg *= 3;
-      this.damageEnemy(target, dmg, 12 + this.lvl("machete") * 2, dir, crit);
-    } else {
-      hitPoint = this.pos.clone().addScaledVector(dir, 60);
-    }
-    this.tracer(this.pos.clone().addScaledVector(dir, 1.2), hitPoint);
-    if (this.mag === 0) this.startReload();
+    if (slot.mag === 0) this.startReload();
   }
 
   private trySwing() {
@@ -768,7 +812,7 @@ export class Game {
       e.stun += this.buffs.has("concussor") && source !== "melee" ? stun * 1.5 : stun;
       if (e.stun >= e.stunMax) {
         e.stun = 0;
-        e.downTimer = e.kind === "heavy" ? 2.6 : 1.8;
+        e.downTimer = ENEMIES[e.kind].downTime;
         e.chargeState = 0;
         e.mesh.rotation.z = 1.2;
         this.sfx.play("stagger");
@@ -790,7 +834,7 @@ export class Game {
     this.comboTimer = 3;
     this.sfx.play("kill");
     this.blood(e.mesh.position.x, e.mesh.position.y + 0.6, e.mesh.position.z, 16);
-    let reward = 8 + this.wave * 2 + (e.kind === "heavy" ? 20 : e.kind === "spitter" ? 6 : 0);
+    let reward = 8 + this.wave * 2 + ENEMIES[e.kind].bounty;
     if (source === "lava" || source === "geyser") {
       reward += 25;
       const where = source === "lava" ? "Lava" : "Geyser";
@@ -872,21 +916,22 @@ export class Game {
   private makeEnemy(kind: EnemyKind): Enemy {
     const group = new THREE.Group();
     const mats: THREE.MeshLambertMaterial[] = [];
-    const color = this.mapDef.enemyTint[kind];
+    const def = ENEMIES[kind];
+    const color = this.mapDef.enemyTint[def.behavior];
     // a low self-lit floor keeps silhouettes readable against the dark crater
     const skin = new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.22 });
     const dark = new THREE.MeshLambertMaterial({ color: 0x5a4038 });
     mats.push(skin, dark);
     // flash + charge tints overwrite emissive, so record the resting value to restore
     for (const mat of mats) mat.userData.baseEmissive = mat.emissive.getHex();
-    const scale = kind === "heavy" ? 1.55 : kind === "spitter" ? 1.0 : 0.95;
+    const scale = def.scale;
     const torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.95, 0.45), skin);
     torso.position.y = 1.1;
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.34), skin);
     head.position.y = 1.78;
     const eye = new THREE.Mesh(
       new THREE.BoxGeometry(0.3, 0.06, 0.04),
-      new THREE.MeshBasicMaterial({ color: kind === "spitter" ? 0x9dff5a : 0xff4020 }),
+      new THREE.MeshBasicMaterial({ color: def.eye }),
     );
     eye.position.set(0, 1.82, -0.19);
     const legL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.65, 0.22), dark);
@@ -903,28 +948,24 @@ export class Game {
     group.userData.legs = [legL, legR];
     group.userData.arms = [armL, armR];
 
-    const base: Record<EnemyKind, Partial<Enemy>> = {
-      harasser: { hp: 46, speed: 4.7, damage: 9, radius: 0.5, stunMax: 55 },
-      heavy: { hp: 240, speed: 2.1, damage: 28, radius: 0.95, stunMax: 130 },
-      spitter: { hp: 72, speed: 2.7, damage: 13, radius: 0.55, stunMax: 55 },
-    };
-    const b = base[kind];
+    const b = def;
     const hpMul = 1 + 0.13 * (this.wave - 1);
     const hp = Math.round((b.hp as number) * hpMul);
     return {
       kind,
+      behavior: b.behavior,
       mesh: group,
       mats,
       baseColor: color,
       hp,
       maxHp: hp,
-      radius: b.radius as number,
+      radius: b.radius,
       height: 2 * scale,
-      speed: (b.speed as number) * (1 + Math.min(0.35, this.wave * 0.015)),
-      damage: (b.damage as number) * (1 + 0.06 * (this.wave - 1)),
+      speed: b.speed * (1 + Math.min(0.35, this.wave * 0.015)),
+      damage: b.damage * (1 + 0.06 * (this.wave - 1)),
       attackCd: 0,
       stun: 0,
-      stunMax: b.stunMax as number,
+      stunMax: b.stunMax,
       downTimer: 0,
       flash: 0,
       chargeState: 0,
@@ -1109,10 +1150,10 @@ export class Game {
     if (this.reloadT > 0) {
       this.reloadT -= dt;
       if (this.reloadT <= 0) {
-        const need = this.magSize - this.mag;
-        const take = Math.min(need, this.reserve);
-        this.mag += take;
-        this.reserve -= take;
+        const slot = this.ammo[this.weapon];
+        const take = Math.min(this.magCap(this.weapon) - slot.mag, slot.reserve);
+        slot.mag += take;
+        slot.reserve -= take;
       }
     }
 
@@ -1196,8 +1237,10 @@ export class Game {
 
     // weapons
     if (!this.downed && this.locked) {
-      if (this.weapon === "rifle" && this.mouseDown) this.fireRifle();
-      if (this.weapon === "machete" && this.mouseDown) this.trySwing();
+      if (this.mouseDown) {
+        if (WEAPONS[this.weapon].kind === "gun") this.fireGun();
+        else this.trySwing();
+      }
     }
     if (this.swingT > 0) {
       this.swingT -= dt;
@@ -1208,15 +1251,18 @@ export class Game {
     }
 
     this.bobT += dt * (sprinting ? 13 : 8) * (input.lengthSq() > 0 ? 1 : 0);
-    this.rifleModel.visible = this.weapon === "rifle";
-    this.macheteModel.visible = this.weapon === "machete";
+    for (const id of WEAPON_IDS) this.weaponModels[id].visible = id === this.weapon;
     // viewmodel animation
     this.recoil = Math.max(0, this.recoil - dt * 7);
     const swing = this.swingT > 0 ? Math.sin((1 - this.swingT / 0.42) * Math.PI) : 0;
-    this.rifleModel.position.set(0.28, -0.26 + Math.sin(this.bobT) * 0.012, -0.15 + this.recoil * 0.09);
-    this.rifleModel.rotation.x = this.recoil * 0.22;
-    this.macheteModel.rotation.set(-swing * 2.1, swing * 0.6, -0.25 + swing * 1.2);
-    this.macheteModel.position.set(0.34 - swing * 0.35, -0.34 + swing * 0.25, -0.35 - swing * 0.2);
+    const held = this.weaponModels[this.weapon];
+    if (WEAPONS[this.weapon].kind === "melee") {
+      held.rotation.set(-swing * 2.1, swing * 0.6, -0.25 + swing * 1.2);
+      held.position.set(0.34 - swing * 0.35, -0.34 + swing * 0.25, -0.35 - swing * 0.2);
+    } else {
+      held.position.set(0.28, -0.26 + Math.sin(this.bobT) * 0.012, -0.15 + this.recoil * 0.09);
+      held.rotation.x = this.recoil * 0.22;
+    }
     this.muzzle.intensity = Math.max(0, this.muzzle.intensity - dt * 40);
   }
 
@@ -1307,7 +1353,7 @@ export class Game {
       let mvz = 0;
       e.attackCd -= dt;
 
-      if (e.kind === "harasser") {
+      if (e.behavior === "rusher") {
         // flanking: approach on an arc
         const arc = dist > 6 ? 0.8 * e.flank : 0.15 * e.flank;
         const ang = Math.atan2(nz, nx) + arc;
@@ -1317,7 +1363,7 @@ export class Game {
           e.attackCd = 0.9;
           this.hurt(e.damage, "hit", m.position.x, m.position.z);
         }
-      } else if (e.kind === "spitter") {
+      } else if (e.behavior === "ranged") {
         e.shootCd -= dt;
         const want = 11;
         const drive = dist > want + 2 ? 1 : dist < want - 2 ? -1 : 0;
@@ -1461,7 +1507,10 @@ export class Game {
       }
       if (d < 1.2 && !this.downed) {
         if (p.kind === "ammo") {
-          this.reserve = Math.min(this.reserveMax, this.reserve + 70);
+          for (const id of WEAPON_IDS) {
+            const max = WEAPONS[id].reserveMax;
+            this.ammo[id].reserve = Math.min(max, this.ammo[id].reserve + Math.round(max * 0.29));
+          }
           this.toast("+70 ammo", "good");
         } else if (p.kind === "med") {
           this.heal(35);
@@ -1554,9 +1603,11 @@ export class Game {
       maxStamina: this.maxStamina,
       slag: this.slag,
       weapon: this.weapon,
-      mag: this.mag,
-      magSize: this.magSize,
-      reserve: this.reserve,
+      weaponName: WEAPONS[this.weapon].name,
+      weaponNote: WEAPONS[this.weapon].note,
+      mag: this.ammo[this.weapon]?.mag ?? 0,
+      magSize: this.magCap(this.weapon),
+      reserve: this.ammo[this.weapon]?.reserve ?? 0,
       reloading: this.reloadT > 0,
       downed: this.downed,
       bleedOut: Math.max(0, this.bleed),

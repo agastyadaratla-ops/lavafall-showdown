@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Game } from "@/game/game";
 import { MAPS } from "@/game/maps";
+import { WEAPONS, WEAPONS_BY_SLOT } from "@/game/weapons";
 import type { HudState } from "@/game/types";
 
 const EMPTY: HudState = {
@@ -18,6 +19,8 @@ const EMPTY: HudState = {
   maxStamina: 100,
   slag: 0,
   weapon: "rifle",
+  weaponName: "Rifle",
+  weaponNote: "Balanced automatic",
   mag: 30,
   magSize: 30,
   reserve: 150,
@@ -41,7 +44,7 @@ const CONTROLS: Array<[string, string]> = [
   ["Mouse", "Look / Aim"],
   ["LMB", "Fire weapon"],
   ["RMB", "Quick machete"],
-  ["1 / 2 / Q", "Swap rifle & machete"],
+  [`1-${WEAPONS_BY_SLOT.length} / Q`, "Swap weapons"],
   ["R", "Reload"],
   ["Shift", "Sprint (stamina)"],
   ["Space", "Dodge roll (i-frames)"],
@@ -196,10 +199,8 @@ export default function DeadlandsGame() {
           </div>
 
           <div className="pointer-events-none absolute right-6 bottom-6 text-right">
-            <div className="text-display text-xs text-muted-foreground">
-              {hud.weapon === "rifle" ? "Scrap Rifle" : "Machete"}
-            </div>
-            {hud.weapon === "rifle" ? (
+            <div className="text-display text-xs text-muted-foreground">{hud.weaponName}</div>
+            {hud.magSize > 0 ? (
               <div className="text-display text-4xl leading-none">
                 {hud.mag}
                 <span className="text-xl text-muted-foreground">/{hud.reserve}</span>
@@ -207,10 +208,25 @@ export default function DeadlandsGame() {
             ) : (
               <div className="text-display text-4xl leading-none">∞</div>
             )}
+            <div className="text-[11px] text-muted-foreground">{hud.weaponNote}</div>
             {hud.reloading && <div className="text-display text-xs text-ember">Reloading…</div>}
-            {hud.weapon === "rifle" && hud.mag === 0 && !hud.reloading && (
+            {hud.magSize > 0 && hud.mag === 0 && !hud.reloading && (
               <div className="text-display text-xs text-destructive">Press R</div>
             )}
+            <div className="mt-2 flex justify-end gap-1">
+              {WEAPONS_BY_SLOT.map((id) => (
+                <span
+                  key={id}
+                  className={`text-display rounded-sm border px-1.5 text-[11px] ${
+                    hud.weapon === id
+                      ? "border-ember bg-ember/20 text-foreground"
+                      : "border-border text-muted-foreground"
+                  }`}
+                >
+                  {WEAPONS[id].slot}
+                </span>
+              ))}
+            </div>
           </div>
 
           <div className="pointer-events-none absolute left-1/2 top-5 -translate-x-1/2 text-center">

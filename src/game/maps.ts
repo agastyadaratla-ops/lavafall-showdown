@@ -1,4 +1,4 @@
-import type { EnemyKind } from "./types";
+import type { EnemyBehavior } from "./enemies";
 
 /** Shared crater radius. Both maps use the same footprint so spawn rings and the
  *  player clamp in game.ts stay valid; only theme, hazard and routing change. */
@@ -68,7 +68,8 @@ export interface MapDef {
   // ---- set dressing
   props: "boulders" | "bones";
   propColor: number;
-  enemyTint: Record<EnemyKind, number>;
+  /** keyed by behaviour, so new enemy types inherit a palette automatically */
+  enemyTint: Record<EnemyBehavior, number>;
 }
 
 const DEADLANDS: MapDef = {
@@ -125,7 +126,7 @@ const DEADLANDS: MapDef = {
 
   props: "boulders",
   propColor: 0x1c1717,
-  enemyTint: { heavy: 0xd9694a, spitter: 0x86d155, harasser: 0xe0977c },
+  enemyTint: { charger: 0xd9694a, ranged: 0x86d155, rusher: 0xe0977c },
 };
 
 const BONE_HOLLOW: MapDef = {
@@ -185,10 +186,127 @@ const BONE_HOLLOW: MapDef = {
 
   props: "bones",
   propColor: 0xcfc7a6,
-  enemyTint: { heavy: 0x8e6f3f, spitter: 0x6fae4a, harasser: 0xa98c5c },
+  enemyTint: { charger: 0x8e6f3f, ranged: 0x6fae4a, rusher: 0xa98c5c },
 };
 
-export const MAPS: MapDef[] = [DEADLANDS, BONE_HOLLOW];
+const RIMEFALL: MapDef = {
+  id: "rimefall",
+  name: "Rimefall",
+  tagline: "Frozen crater survival",
+  blurb:
+    "A snowbound caldera cracked open by a meltwater channel that never freezes. Glare off the ice makes every silhouette read at range - and leaves you nowhere to hide either.",
+  cta: "Cross the ice",
+
+  background: 0x9fb6c8,
+  fogColor: 0xc3d4e0,
+  fogNear: 44,
+  fogFar: 210,
+  domeColor: 0xbcd0dd,
+
+  ground: 0xd6e2ea,
+  band: 0xa9c0d0,
+  bank: 0x5e7484,
+  bridge: 0x8a9aa4,
+  rim: 0x8fa6b6,
+
+  hazardName: "meltwater",
+  hazardHalf: 4.4,
+  // dark glacial water with pale crests, reading almost black against the snow
+  hazardRamp: { r: [10, 60], g: [40, 120], b: [80, 150] },
+  hazardRepeat: [13, 2],
+  hazardY: -0.14,
+  hazardDrift: 0.02,
+  hazardLight: 0x6fc8ff,
+  hazardLightIntensity: 1.1,
+
+  bridges: [
+    [-22, -14],
+    [8, 18],
+  ],
+  vents: [
+    [-24, 7],
+    [-9, -15],
+    [6, 17],
+    [20, -8],
+    [-14, 20],
+    [25, 12],
+    [-2, -23],
+    [14, -20],
+  ],
+  ventRing: 0xbfe8ff,
+  ventColumn: 0xe6f6ff,
+
+  hemiSky: 0xdcecf6,
+  hemiGround: 0x6d8494,
+  hemiIntensity: 2.0,
+  sunColor: 0xffffff,
+  sunIntensity: 1.2,
+
+  props: "boulders",
+  propColor: 0xb9cdd9,
+  // dark hides on snow: warm browns stay legible against the glare
+  enemyTint: { charger: 0x7a4230, ranged: 0x4f8f3a, rusher: 0x8c5a4a },
+};
+
+const VERDIGRIS: MapDef = {
+  id: "verdigris",
+  name: "Verdigris",
+  tagline: "Flooded copper works",
+  blurb:
+    "A drowned smelting yard gone green with rot, split by a channel of spent acid. The catwalks are the only dry way across, and the vents still purge on their own schedule.",
+  cta: "Enter the works",
+
+  background: 0x2a3a34,
+  fogColor: 0x3d5a4e,
+  fogNear: 38,
+  fogFar: 175,
+  domeColor: 0x35564a,
+
+  ground: 0x2f3a35,
+  band: 0x3c4a3e,
+  bank: 0x1a2420,
+  bridge: 0x5a4a34,
+  rim: 0x27332e,
+
+  hazardName: "acid",
+  hazardHalf: 4.5,
+  hazardRamp: { r: [40, 90], g: [200, 55], b: [30, 70] },
+  hazardRepeat: [14, 2],
+  hazardY: -0.14,
+  hazardDrift: 0.03,
+  hazardLight: 0x7dff4a,
+  hazardLightIntensity: 2.0,
+
+  bridges: [
+    [-20, -12],
+    [6, 15],
+  ],
+  vents: [
+    [-26, -11],
+    [-13, 14],
+    [4, -18],
+    [17, 8],
+    [27, -14],
+    [-6, 23],
+    [11, 21],
+    [-19, -21],
+  ],
+  ventRing: 0xaaff66,
+  ventColumn: 0xd8ffb0,
+
+  hemiSky: 0x7fa38f,
+  hemiGround: 0x2c3a32,
+  hemiIntensity: 1.5,
+  sunColor: 0xd8f0d0,
+  sunIntensity: 0.7,
+
+  props: "boulders",
+  propColor: 0x3b5148,
+  // warm tones so enemies separate from the green everywhere else
+  enemyTint: { charger: 0xc46a4a, ranged: 0xe0d055, rusher: 0xd9a066 },
+};
+
+export const MAPS: MapDef[] = [DEADLANDS, BONE_HOLLOW, RIMEFALL, VERDIGRIS];
 
 export function getMap(id: string): MapDef {
   return MAPS.find((m) => m.id === id) ?? DEADLANDS;
