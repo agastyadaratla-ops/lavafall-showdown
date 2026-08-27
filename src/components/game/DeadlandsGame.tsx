@@ -12,6 +12,8 @@ const EMPTY: HudState = {
   flagMode: "base",
   flagHolder: "",
   flagMine: false,
+  bossName: "",
+  bossHp: 0,
   phase: "title",
   hurtDir: null,
   hurtDirT: 0,
@@ -220,6 +222,21 @@ export default function DeadlandsGame() {
                 : hud.flagMode === "dropped"
                   ? "Core dropped — recover it"
                   : "Core is at the invader siphon"}
+          </div>
+        </div>
+      )}
+
+      {/* boss health */}
+      {playing && hud.bossName && (
+        <div className="pointer-events-none absolute left-1/2 top-32 w-[min(520px,80vw)] -translate-x-1/2 text-center">
+          <div className="text-display text-sm tracking-widest text-destructive uppercase">
+            {hud.bossName}
+          </div>
+          <div className="mt-1 h-3 w-full overflow-hidden rounded-sm border border-destructive/60 bg-background/70">
+            <div
+              className="h-full bg-destructive transition-[width] duration-150"
+              style={{ width: `${Math.max(0, Math.min(100, hud.bossHp * 100))}%` }}
+            />
           </div>
         </div>
       )}
@@ -464,6 +481,25 @@ export default function DeadlandsGame() {
       )}
 
       {/* game over */}
+      {hud.phase === "victory" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background/90 backdrop-blur">
+          <h2 className="text-display text-5xl text-ember">City secured</h2>
+          <p className="max-w-md text-center text-sm text-muted-foreground">
+            All {hud.captureGoal} cores recovered from the invaders. Neo Kestrel holds — for now.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Reached wave <span className="text-display text-foreground">{hud.wave}</span> ·{" "}
+            <span className="text-display text-foreground">{hud.kills}</span> machines destroyed
+          </p>
+          <button
+            onClick={restart}
+            className="text-display rounded-sm bg-ember px-8 py-3 text-lg text-ember-foreground"
+          >
+            Run it again
+          </button>
+        </div>
+      )}
+
       {hud.phase === "gameover" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background/90 backdrop-blur">
           <h2 className="text-display text-5xl text-destructive">You died in the ash</h2>

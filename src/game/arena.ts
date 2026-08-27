@@ -278,6 +278,26 @@ export class Arena {
     this.hazardMat.map?.dispose();
   }
 
+  /** Half width of the hazard channel, for enemy navigation. */
+  get halfWidth() {
+    return this.half;
+  }
+
+  /** Centre x of the crossing nearest this position - enemies route via these. */
+  nearestCrossing(x: number) {
+    let best = 0;
+    let bestD = Infinity;
+    for (const [a, b] of this.bridges) {
+      const c = (a + b) / 2;
+      const d = Math.abs(c - x);
+      if (d < bestD) {
+        bestD = d;
+        best = c;
+      }
+    }
+    return best;
+  }
+
   /** true when the ground position is inside the hazard river (and off any crossing). */
   inLava(x: number, z: number) {
     if (Math.abs(z) > this.half) return false;

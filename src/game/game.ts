@@ -1,6 +1,15 @@
 import * as THREE from "three";
 import { Arena, ARENA_R } from "./arena";
-import { ENEMIES, pickEnemy, type EnemyBehavior, type EnemyKind } from "./enemies";
+import {
+  ELITES,
+  ENEMIES,
+  bossForWave,
+  pickEnemy,
+  rollElite,
+  type EliteKind,
+  type EnemyBehavior,
+  type EnemyKind,
+} from "./enemies";
 import { getMap, type MapDef } from "./maps";
 import {
   NetSession,
@@ -39,6 +48,12 @@ interface Enemy {
   nid: number;
   /** clients ease the mesh toward the last snapshot rather than simulating */
   netTarget: THREE.Vector3;
+  elite: EliteKind;
+  /** multiplier on incoming damage; armoured elites sit below 1 */
+  resist: number;
+  boss: boolean;
+  summonEvery: number;
+  summonCd: number;
   mesh: THREE.Group;
   mats: THREE.MeshLambertMaterial[];
   baseColor: number;
@@ -202,6 +217,9 @@ export class Game {
   };
   private playerName = "Hero";
   private nextNid = 0;
+  /** enemies removed this wave, however they died - drives wave completion */
+  private waveCleared = 0;
+  private bossRef: Enemy | null = null;
   /** clients only: nid -> enemy, for reconciling snapshots */
   private netEnemies = new Map<number, Enemy>();
   private worldTimer = 0;
@@ -547,8 +565,15 @@ export class Game {
             this.captures++;
             this.addSlag(120);
             this.resetFlag();
-            this.toast(`Core secured! ${this.captures}/${this.captureGoal}`, "good");
             this.sfx.play("buff");
+            if (this.captures >= this.captureGoal) {
+              this.phase = "victory";
+              this.releaseLock();
+              this.toast("City secured - every core recovered!", "good");
+              this.pushState();
+              return;
+            }
+            this.toast(`Core secured! ${this.captures}/${this.captureGoal}`, "good");
           }
         }
       } else {
@@ -869,15 +894,22 @@ export class Game {
   private startWave(w: number) {
     this.wave = w;
     this.spawnQueue = [];
-    const count = Math.min(60, 6 + Math.round(w * 2.2));
+    this.bossRef = null;
+    const boss = bossForWave(w);
+    const count = Math.min(64, 6 + Math.round(w * 2.4));
     for (let i = 0; i < count; i++) {
       this.spawnQueue.push(pickEnemy(w));
     }
-    this.waveTotal = count;
-    this.spawnTimer = 0.6;
+    if (boss) this.spawnQueue.unshift(boss);
+    this.waveTotal = this.spawnQueue.length;
+    this.waveCleared = 0;
+    this.spawnTimer = 0.4;
     this.phase = "playing";
     this.sfx.play("wave");
-    this.toast(`Wave ${w}`, "info");
+    this.toast(
+      boss ? `Wave ${w} - ${ENEMIES[boss].name} incoming!` : `Wave ${w}`,
+      boss ? "bad" : "info",
+    );
     // bait pickups near the lava
     for (let i = 0; i < 2 + (w % 3 === 0 ? 2 : 0); i++) this.spawnPickup();
     // a wave can start straight off the respite timer, where the pointer was released
@@ -886,7 +918,7 @@ export class Game {
 
   private beginRespite() {
     this.phase = "respite";
-    this.respiteLeft = 22;
+    this.respiteLeft = 14;
     this.releaseLock();
     for (let i = 0; i < 3; i++) this.spawnPickup();
     this.pushState();
@@ -900,15 +932,18 @@ export class Game {
       this.bestWave = this.wave;
       localStorage.setItem(bestKey(this.mapDef.id), String(this.bestWave));
     }
-    if (this.wave % 3 === 0) {
-      const pool = BUFFS.filter((b) => !this.buffs.has(b.id));
-      this.draft = pool.sort(() => Math.random() - 0.5).slice(0, 3);
-      if (this.draft.length) {
-        this.phase = "draft";
-        this.releaseLock();
-        this.pushState();
-        return;
-      }
+    // only a cleared boss earns a breather; otherwise the next wave rolls straight on
+    if (bossForWave(this.wave) === null) {
+      this.startWave(this.wave + 1);
+      return;
+    }
+    const pool = BUFFS.filter((b) => !this.buffs.has(b.id));
+    this.draft = pool.sort(() => Math.random() - 0.5).slice(0, 3);
+    if (this.draft.length) {
+      this.phase = "draft";
+      this.releaseLock();
+      this.pushState();
+      return;
     }
     this.beginRespite();
   }
@@ -1203,7 +1238,7 @@ export class Game {
       if (this.buffs.has("executioner")) dmg *= 2.2;
     }
     if (source === "tackle" && this.buffs.has("juggernaut")) dmg *= 2;
-    e.hp -= dmg;
+    e.hp -= dmg * e.resist;
     e.flash = 0.12;
     this.hitFlash = crit ? 1 : 0.7;
     this.sfx.play("hitmark");
@@ -1230,6 +1265,20 @@ export class Game {
     e.alive = false;
     e.corpse = 1.1;
     e.mesh.rotation.z = Math.PI / 2.2;
+    this.waveCleared++;
+    if (e.boss) this.toast(`${ENEMIES[e.kind].name} destroyed!`, "good");
+    if (e.elite === "volatile") {
+      const ex = e.mesh.position.x;
+      const ez = e.mesh.position.z;
+      this.fireBurst(ex, ez);
+      const pd = Math.hypot(this.pos.x - ex, this.pos.z - ez);
+      if (pd < 5) this.hurt(24 * (1 - pd / 5), "hit", ex, ez);
+      for (const o of this.enemies) {
+        if (!o.alive || o === e) continue;
+        const d = Math.hypot(o.mesh.position.x - ex, o.mesh.position.z - ez);
+        if (d < 5) this.damageEnemy(o, 70 * (1 - d / 5), 0, new THREE.Vector3(0, 0, 0), false);
+      }
+    }
     // environmental deaths never count as kills, however the enemy ended up there
     const hazard = source === "lava" || source === "geyser";
     if (!hazard) this.kills++;
@@ -1237,7 +1286,7 @@ export class Game {
     this.comboTimer = 3;
     this.sfx.play("kill");
     this.sparks(e.mesh.position.x, e.mesh.position.y + 0.6, e.mesh.position.z, 16);
-    let reward = 8 + this.wave * 2 + ENEMIES[e.kind].bounty;
+    let reward = 8 + this.wave * 2 + ENEMIES[e.kind].bounty + ELITES[e.elite].bounty;
     if (source === "lava" || source === "geyser") {
       reward += 25;
       const where = source === "lava" ? "Lava" : "Geyser";
@@ -1320,7 +1369,11 @@ export class Game {
     const group = new THREE.Group();
     const mats: THREE.MeshLambertMaterial[] = [];
     const def = ENEMIES[kind];
-    const color = this.mapDef.enemyTint[def.behavior];
+    // bosses are already a threat; elite prefixes are for the rank and file
+    const elite: EliteKind = def.boss ? "none" : rollElite(this.wave);
+    const ed = ELITES[elite];
+    // elites wear their prefix colour so the threat reads instantly
+    const color = elite === "none" ? this.mapDef.enemyTint[def.behavior] : ed.tint;
     // a low self-lit floor keeps silhouettes readable against the dark crater
     const skin = new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.22 });
     const dark = new THREE.MeshLambertMaterial({ color: 0x5a4038 });
@@ -1353,12 +1406,17 @@ export class Game {
 
     const b = def;
     const hpMul = 1 + 0.13 * (this.wave - 1);
-    const hp = Math.round((b.hp as number) * hpMul);
+    const hp = Math.round(b.hp * hpMul * ed.hpMul);
     return {
       kind,
       behavior: b.behavior,
       nid: ++this.nextNid,
       netTarget: new THREE.Vector3(),
+      elite,
+      resist: ed.resist,
+      boss: !!def.boss,
+      summonEvery: def.summonEvery ?? 0,
+      summonCd: def.summonEvery ?? 0,
       mesh: group,
       mats,
       baseColor: color,
@@ -1366,8 +1424,8 @@ export class Game {
       maxHp: hp,
       radius: b.radius,
       height: 2 * scale,
-      speed: b.speed * (1 + Math.min(0.35, this.wave * 0.015)),
-      damage: b.damage * (1 + 0.06 * (this.wave - 1)),
+      speed: b.speed * (1 + Math.min(0.35, this.wave * 0.015)) * ed.speedMul,
+      damage: b.damage * (1 + 0.06 * (this.wave - 1)) * ed.damageMul,
       attackCd: 0,
       stun: 0,
       stunMax: b.stunMax,
@@ -1389,18 +1447,21 @@ export class Game {
 
   private spawnEnemy(kind: EnemyKind) {
     const e = this.makeEnemy(kind);
-    let a = Math.random() * Math.PI * 2;
-    let x = Math.cos(a) * (ARENA_R - 2);
-    let z = Math.sin(a) * (ARENA_R - 2);
-    let guard = 0;
-    while (this.arena.inLava(x, z) && guard++ < 12) {
-      a = Math.random() * Math.PI * 2;
-      x = Math.cos(a) * (ARENA_R - 2);
-      z = Math.sin(a) * (ARENA_R - 2);
+    // ring around the player, not the arena rim: at radius 58 a rim spawn took
+    // the better part of half a minute to walk in
+    let x = 0;
+    let z = 0;
+    for (let guard = 0; guard < 24; guard++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 26 + Math.random() * 14;
+      x = this.pos.x + Math.cos(a) * r;
+      z = this.pos.z + Math.sin(a) * r;
+      if (Math.hypot(x, z) < ARENA_R - 4 && !this.arena.inLava(x, z)) break;
     }
     e.mesh.position.set(x, 0, z);
     this.scene.add(e.mesh);
     this.enemies.push(e);
+    if (e.boss) this.bossRef = e;
   }
 
   // ---------------------------------------------------------------- pickups
@@ -1560,9 +1621,14 @@ export class Game {
     if (this.spawnQueue.length && this.spawnTimer <= 0 && alive < MAX_ALIVE) {
       const kind = this.spawnQueue.shift()!;
       this.spawnEnemy(kind);
-      this.spawnTimer = Math.max(0.16, 0.9 - this.wave * 0.03);
+      this.spawnTimer = Math.max(0.1, 0.7 - this.wave * 0.03);
     }
-    if (!this.spawnQueue.length && alive === 0) this.completeWave();
+    // count removals rather than "nothing alive": hazards and stuck enemies used to
+    // stall a wave forever, and with continuous pressure there is rarely a lull
+    const bossDown = !this.bossRef || !this.bossRef.alive;
+    if (this.waveCleared >= this.waveTotal && bossDown && !this.spawnQueue.length) {
+      this.completeWave();
+    }
   }
 
   private updatePlayer(dt: number) {
@@ -1715,6 +1781,21 @@ export class Game {
     }
   }
 
+  /**
+   * Steer around the plasma channel instead of walking into it. The channel spans
+   * the arena with only two crossings, and the objective sits on the far bank, so
+   * naive straight-line chase used to delete most of the horde for free.
+   */
+  private navTarget(ex: number, ez: number, px: number, pz: number) {
+    const half = this.arena.halfWidth;
+    if ((ez >= 0) === (pz >= 0)) return { x: px, z: pz };
+    const cx = this.arena.nearestCrossing(ex);
+    // hold the crossing's x while stepping across, then hand back to direct chase
+    const onApproach = Math.abs(ez) <= half + 2.5;
+    const side = onApproach ? (pz >= 0 ? 1 : -1) : ez >= 0 ? 1 : -1;
+    return { x: cx, z: side * (half + 2.5) };
+  }
+
   private updateEnemies(dt: number) {
     const px = this.pos.x;
     const pz = this.pos.z;
@@ -1761,11 +1842,14 @@ export class Game {
         continue;
       }
 
-      const dx = px - m.position.x;
-      const dz = pz - m.position.z;
-      const dist = Math.hypot(dx, dz) || 1;
-      const nx = dx / dist;
-      const nz = dz / dist;
+      // real distance to the player drives attacks; nav drives movement
+      const dist = Math.hypot(px - m.position.x, pz - m.position.z) || 1;
+      const nav = this.navTarget(m.position.x, m.position.z, px, pz);
+      const dx = nav.x - m.position.x;
+      const dz = nav.z - m.position.z;
+      const nlen = Math.hypot(dx, dz) || 1;
+      const nx = dx / nlen;
+      const nz = dz / nlen;
       m.rotation.y = Math.atan2(nx, nz) + Math.PI;
       e.bob += dt * e.speed * 2.4;
       const legs = m.userData.legs as THREE.Mesh[];
@@ -1777,6 +1861,17 @@ export class Game {
       let mvx = 0;
       let mvz = 0;
       e.attackCd -= dt;
+
+      if (e.boss && e.summonEvery > 0) {
+        e.summonCd -= dt;
+        if (e.summonCd <= 0) {
+          e.summonCd = e.summonEvery;
+          for (let n = 0; n < 3; n++) this.spawnQueue.push("swarmling");
+          // keep wave accounting honest when the boss adds to the queue
+          this.waveTotal += 3;
+          this.toast("Hive Frame is venting Nanites!", "bad");
+        }
+      }
 
       if (e.behavior === "rusher") {
         // flanking: approach on an arc
@@ -2030,6 +2125,11 @@ export class Game {
       net: this.netStatus,
       captures: this.captures,
       captureGoal: this.captureGoal,
+      bossName: this.bossRef && this.bossRef.alive ? ENEMIES[this.bossRef.kind].name : "",
+      bossHp:
+        this.bossRef && this.bossRef.alive
+          ? Math.max(0, this.bossRef.hp / this.bossRef.maxHp)
+          : 0,
       flagMode: this.flag.mode,
       flagHolder: this.flag.mode === "carried" ? this.carrierName() : "",
       flagMine: this.flag.carrier === this.selfNetId,
