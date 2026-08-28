@@ -6,6 +6,7 @@ import type { HudState } from "@/game/types";
 
 const EMPTY: HudState = {
   net: { role: "solo", room: "", connected: false, peers: 0, error: "" },
+  selfName: "Hero",
   roster: [],
   captures: 0,
   captureGoal: 3,
@@ -583,10 +584,33 @@ export default function DeadlandsGame() {
                     {hud.net.room}
                   </span>
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  {hud.roster.length
-                    ? `In the squad: ${hud.roster.map((r) => r.name).join(", ")}`
-                    : "Waiting for teammates to join…"}
+                <div className="rounded-sm border border-border bg-background/60 p-2">
+                  <div className="text-display mb-1 text-xs tracking-widest text-muted-foreground uppercase">
+                    Party · {hud.roster.length + 1}
+                  </div>
+                  <ul className="space-y-0.5 text-sm">
+                    <li className="flex items-center justify-between">
+                      <span className="text-display">{hud.selfName}</span>
+                      <span className="text-xs text-muted-foreground">
+                        you{hud.net.role === "host" ? " · host" : ""}
+                      </span>
+                    </li>
+                    {hud.roster.map((r) => (
+                      <li key={r.id} className="flex items-center justify-between">
+                        <span className="text-display text-ember">{r.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {hud.net.role === "client" && r.id === "host" ? "host" : "ready"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {hud.roster.length === 0 && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {hud.net.role === "host"
+                        ? "Share the code above to bring in your squad."
+                        : "Connected — waiting for the host's party list…"}
+                    </p>
+                  )}
                 </div>
                 {hud.net.error && <p className="text-xs text-destructive">{hud.net.error}</p>}
                 <button

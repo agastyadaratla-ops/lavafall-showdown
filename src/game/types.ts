@@ -41,6 +41,7 @@ export interface RosterEntry {
 
 export interface HudState {
   net: NetStatus;
+  selfName: string;
   captures: number;
   captureGoal: number;
   bossName: string;

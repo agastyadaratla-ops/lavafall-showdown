@@ -144,7 +144,12 @@ export class NetSession {
         resolve(code);
       });
 
-      peer.on("connection", (conn) => this.adopt(conn, name));
+      peer.on("connection", (conn) => {
+        // an incoming connection is not usable until it opens; adopting on the
+        // connection event meant every send before that was silently dropped
+        if (conn.open) this.adopt(conn);
+        else conn.on("open", () => this.adopt(conn));
+      });
 
       peer.on("error", (err) => {
         this.error = String(err?.message || err);
@@ -168,7 +173,7 @@ export class NetSession {
 
       peer.on("open", (id) => {
         this.selfId = id;
-        const conn = peer.connect(PREFIX + room, { reliable: false });
+        const conn = peer.connect(PREFIX + room, { reliable: true });
 
         const failTimer = setTimeout(() => {
           this.error = "No room with that code";
@@ -178,7 +183,7 @@ export class NetSession {
 
         conn.on("open", () => {
           clearTimeout(failTimer);
-          this.adopt(conn, name);
+          this.adopt(conn);
           this.rawSend(conn, { t: "hello", id: this.selfId, name });
           resolve();
         });
@@ -199,7 +204,7 @@ export class NetSession {
     });
   }
 
-  private adopt(conn: DataConnection, _name: string) {
+  private adopt(conn: DataConnection) {
     this.conns.set(conn.peer, conn);
     this.events.onPeerJoin(conn.peer);
     this.status();
@@ -221,7 +226,10 @@ export class NetSession {
       this.status();
     };
     conn.on("close", drop);
-    conn.on("error", drop);
+    // only tear down on a closed channel; an error on a live one is recoverable
+    conn.on("error", () => {
+      if (!conn.open) drop();
+    });
   }
 
   private rawSend(conn: DataConnection, msg: NetMessage) {

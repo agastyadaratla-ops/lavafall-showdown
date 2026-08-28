@@ -208,6 +208,7 @@ export class Game {
   private net: NetSession;
   private remotes = new Map<string, Remote>();
   private netTimer = 0;
+  private rosterTimer = 0;
   private netStatus: NetStatus = {
     role: "solo",
     room: "",
@@ -253,7 +254,15 @@ export class Game {
     this.net = new NetSession({
       onMessage: (m, from) => this.onNet(m, from),
       onPeerJoin: () => this.pushState(),
-      onPeerLeave: (id) => this.dropRemote(id),
+      onPeerLeave: (id) => {
+        if (this.netStatus.role === "client") {
+          // the host's remote is keyed "host", not by connection id
+          for (const rid of [...this.remotes.keys()]) this.dropRemote(rid);
+        } else {
+          this.dropRemote(id);
+          this.broadcastRoster();
+        }
+      },
       onStatus: (st) => {
         this.netStatus = st;
         this.pushState();
@@ -366,6 +375,13 @@ export class Game {
   private onNet(m: NetMessage, from: string) {
     if (m.t === "hello") {
       this.ensureRemote(m.id || from, m.name);
+      // tell everyone who is in the party now, including the joiner
+      this.broadcastRoster();
+      this.pushState();
+      return;
+    }
+    if (m.t === "roster") {
+      if (this.netStatus.role === "client") this.applyRoster(m.players);
       this.pushState();
       return;
     }
@@ -473,10 +489,10 @@ export class Game {
     }
   }
 
-  private broadcastSelf() {
-    if (this.netStatus.role === "solo") return;
-    const p: NetPlayer = {
-      id: this.net.selfId || "host",
+  /** Our own state, shared by the position broadcast and the roster. */
+  private selfPlayer(): NetPlayer {
+    return {
+      id: this.selfNetId,
       name: this.playerName,
       x: this.pos.x,
       y: 0,
@@ -488,7 +504,55 @@ export class Game {
       weapon: this.weapon,
       kills: this.kills,
     };
-    this.net.send({ t: "player", p });
+  }
+
+  /**
+   * Host only. Presence used to be inferred from position broadcasts, so a client
+   * that missed those never learned the host existed. Membership is now stated
+   * outright and refreshed on every join and leave.
+   */
+  private broadcastRoster() {
+    if (this.netStatus.role !== "host") return;
+    const players: NetPlayer[] = [this.selfPlayer()];
+    for (const r of this.remotes.values()) {
+      players.push({
+        id: r.id,
+        name: r.name,
+        x: r.target.x,
+        y: 0,
+        z: r.target.z,
+        yaw: r.yaw,
+        hp: r.hp,
+        maxHp: r.maxHp,
+        downed: r.downed,
+        weapon: r.weapon,
+        kills: r.kills,
+      });
+    }
+    this.net.send({ t: "roster", players });
+  }
+
+  /** Clients rebuild the party from the host's roster. */
+  private applyRoster(players: NetPlayer[]) {
+    const keep = new Set<string>();
+    for (const p of players) {
+      if (p.id === this.selfNetId) continue;
+      keep.add(p.id);
+      const r = this.ensureRemote(p.id, p.name);
+      r.name = p.name;
+      r.hp = p.hp;
+      r.maxHp = p.maxHp;
+      r.downed = p.downed;
+      r.seen = performance.now();
+    }
+    for (const id of [...this.remotes.keys()]) {
+      if (!keep.has(id)) this.dropRemote(id);
+    }
+  }
+
+  private broadcastSelf() {
+    if (this.netStatus.role === "solo") return;
+    this.net.send({ t: "player", p: this.selfPlayer() });
   }
 
   // ---------------------------------------------------------------- authority
@@ -1582,6 +1646,12 @@ export class Game {
       this.netTimer = 0.066; // ~15 Hz is plenty for co-op presence
       this.broadcastSelf();
     }
+    this.rosterTimer -= dt;
+    if (this.rosterTimer <= 0) {
+      // heartbeat so a dropped roster announcement heals itself
+      this.rosterTimer = 2;
+      this.broadcastRoster();
+    }
     this.worldTimer -= dt;
     if (this.worldTimer <= 0) {
       this.worldTimer = 0.1; // enemy snapshots are the heavy payload, so a little slower
@@ -2125,6 +2195,7 @@ export class Game {
       maxStamina: this.maxStamina,
       slag: this.slag,
       net: this.netStatus,
+      selfName: this.playerName,
       captures: this.captures,
       captureGoal: this.captureGoal,
       bossName: this.bossRef && this.bossRef.alive ? ENEMIES[this.bossRef.kind].name : "",
