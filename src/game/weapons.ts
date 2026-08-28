@@ -31,7 +31,7 @@ export interface WeaponDef {
 
 export const WEAPONS = {
   rifle: {
-    name: "Rifle",
+    name: "Bolt Rifle",
     slot: 1,
     kind: "gun",
     damage: 18,
@@ -49,8 +49,8 @@ export const WEAPONS = {
     note: "Balanced automatic",
     model: { body: [0.12, 0.14, 0.75], barrel: [0.03, 0.5], color: 0x2c2c30 },
   },
-  machete: {
-    name: "Machete",
+  blade: {
+    name: "Plasma Blade",
     slot: 2,
     kind: "melee",
     damage: 34,
@@ -88,7 +88,7 @@ export const WEAPONS = {
     model: { body: [0.15, 0.16, 0.68], barrel: [0.045, 0.56], color: 0x4a3327 },
   },
   smg: {
-    name: "Ripper",
+    name: "Pulser",
     slot: 4,
     kind: "gun",
     damage: 11,

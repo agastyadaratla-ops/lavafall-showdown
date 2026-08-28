@@ -12,7 +12,7 @@ export interface UpgradeDef {
 export const UPGRADES: UpgradeDef[] = [
   {
     id: "damage",
-    name: "Bored Barrel",
+    name: "Focused Barrel",
     desc: "+6 rifle damage per shot",
     baseCost: 120,
     costStep: 90,
@@ -28,7 +28,7 @@ export const UPGRADES: UpgradeDef[] = [
   },
   {
     id: "rof",
-    name: "Filed Sear",
+    name: "Rapid Cycler",
     desc: "+12% fire rate",
     baseCost: 140,
     costStep: 100,
@@ -43,8 +43,8 @@ export const UPGRADES: UpgradeDef[] = [
     maxLevel: 4,
   },
   {
-    id: "machete",
-    name: "Honed Machete",
+    id: "blade",
+    name: "Honed Blade",
     desc: "+10 melee damage, +15% stun buildup",
     baseCost: 110,
     costStep: 80,
@@ -75,9 +75,9 @@ export const UPGRADES: UpgradeDef[] = [
     maxLevel: 99,
   },
   {
-    id: "adrenaline",
-    name: "Adrenaline Shot",
-    desc: "+1 self-revive charge",
+    id: "repair",
+    name: "Repair Cell",
+    desc: "+1 self-repair charge",
     baseCost: 250,
     costStep: 200,
     maxLevel: 3,
@@ -85,16 +85,16 @@ export const UPGRADES: UpgradeDef[] = [
 ];
 
 export const BUFFS: BuffCard[] = [
-  { id: "bloodletter", name: "Bloodletter", desc: "Machete kills restore 12 health" },
+  { id: "recycler", name: "Recycler", desc: "Blade takedowns restore 12 health" },
   { id: "juggernaut", name: "Juggernaut", desc: "Tackles deal double damage and knock further" },
-  { id: "wildfire", name: "Wildfire", desc: "Enemies killed in lava spray fire, damaging nearby" },
+  { id: "wildfire", name: "Wildfire", desc: "Machines scrapped in plasma erupt, damaging nearby" },
   { id: "featherfoot", name: "Featherfoot", desc: "Dodge roll costs 40% less and is longer" },
-  { id: "scavenger", name: "Scavenger", desc: "Kills have a 25% chance to drop ammo" },
+  { id: "scavenger", name: "Scavenger", desc: "Takedowns have a 25% chance to drop ammo" },
   { id: "magnet", name: "Slag Magnet", desc: "Pickups are drawn to you from 9m away" },
-  { id: "executioner", name: "Executioner", desc: "+120% damage against downed enemies" },
-  { id: "concussor", name: "Concussor", desc: "+50% stun buildup on all hits" },
-  { id: "hollowpoint", name: "Hollow Point", desc: "20% chance for triple-damage crits" },
-  { id: "furnaceborn", name: "Furnaceborn", desc: "Take 60% less lava and geyser damage" },
-  { id: "secondwind", name: "Second Wind", desc: "Stamina refills instantly on any kill streak of 3" },
+  { id: "overload", name: "Overload", desc: "+120% damage against downed machines" },
+  { id: "shockcoil", name: "Shock Coil", desc: "+50% stun buildup on all hits" },
+  { id: "precision", name: "Precision Core", desc: "20% chance for triple-damage crits" },
+  { id: "heatshield", name: "Heat Shielding", desc: "Take 60% less plasma and vent damage" },
+  { id: "secondwind", name: "Second Wind", desc: "Stamina refills instantly on any takedown streak of 3" },
   { id: "prospector", name: "Prospector", desc: "+50% slag from every source" },
 ];

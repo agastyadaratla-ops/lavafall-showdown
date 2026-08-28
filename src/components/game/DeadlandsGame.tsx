@@ -52,13 +52,13 @@ const CONTROLS: Array<[string, string]> = [
   ["WASD", "Move"],
   ["Mouse", "Look / Aim"],
   ["LMB", "Fire weapon"],
-  ["RMB", "Quick machete"],
+  ["RMB", "Quick blade"],
   [`1-${WEAPONS_BY_SLOT.length} / Q`, "Swap weapons"],
   ["R", "Reload"],
   ["Shift", "Sprint (stamina)"],
   ["Space", "Dodge roll (i-frames)"],
   ["F", "Tackle — sprint only"],
-  ["E", "Hold to self-revive when downed"],
+  ["E", "Hold to self-repair when down"],
   ["Esc", "Pause"],
 ];
 
@@ -285,7 +285,7 @@ export default function DeadlandsGame() {
               <Bar value={hud.stamina} max={hud.maxStamina} className="bg-stam" label="Stamina" />
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="text-display">Adrenaline</span>
+              <span className="text-display">Repair cells</span>
               {Array.from({ length: Math.max(hud.adrenaline, 0) }).map((_, i) => (
                 <span key={i} className="h-2.5 w-2.5 rotate-45 bg-slag" />
               ))}
@@ -338,7 +338,7 @@ export default function DeadlandsGame() {
 
           <div className="pointer-events-none absolute right-6 top-5 text-right text-xs">
             <div className="text-display text-lg text-slag">{hud.slag} slag</div>
-            <div className="text-muted-foreground">Kills {hud.kills}</div>
+            <div className="text-muted-foreground">Scrapped {hud.kills}</div>
             <div className="text-muted-foreground">Best wave {hud.bestWave}</div>
           </div>
 
@@ -373,8 +373,8 @@ export default function DeadlandsGame() {
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-destructive/10">
           <h2 className="text-display text-4xl text-destructive">Downed</h2>
           <p className="text-sm text-muted-foreground">
-            Bleeding out in {Math.ceil(hud.bleedOut)}s
-            {hud.adrenaline > 0 ? " — hold E to inject adrenaline" : " — no adrenaline left"}
+            Systems failing in {Math.ceil(hud.bleedOut)}s
+            {hud.adrenaline > 0 ? " — hold E to run a repair cell" : " — no repair cells left"}
           </p>
           {hud.adrenaline > 0 && (
             <div className="h-2 w-64 overflow-hidden rounded-sm border border-border">
@@ -504,7 +504,7 @@ export default function DeadlandsGame() {
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background/90 backdrop-blur">
           <h2 className="text-display text-5xl text-destructive">You died in the ash</h2>
           <div className="text-display text-lg">
-            Wave {hud.wave} · {hud.kills} kills · best wave {hud.bestWave}
+            Wave {hud.wave} · {hud.kills} machines scrapped · best wave {hud.bestWave}
           </div>
           <button
             onClick={restart}
@@ -616,7 +616,7 @@ export default function DeadlandsGame() {
           <p className="text-xs text-muted-foreground">
             Best wave on {activeMap.name}:{" "}
             <span className="text-display text-ember">{hud.bestWave || "—"}</span> · Solo campaign —
-            downed state uses adrenaline self-revives.
+            downed heroes run repair cells to get back up.
           </p>
         </div>
       )}

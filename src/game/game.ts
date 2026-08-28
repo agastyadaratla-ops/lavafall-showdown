@@ -881,7 +881,7 @@ export class Game {
       case "ammo":
         for (const id of WEAPON_IDS) this.ammo[id].reserve = WEAPONS[id].reserveMax;
         break;
-      case "adrenaline":
+      case "repair":
         this.adrenaline += 1;
         break;
     }
@@ -992,7 +992,7 @@ export class Game {
     }
     if (e.button === 0) this.mouseDown = true;
     if (e.button === 2) {
-      this.weapon = "machete";
+      this.weapon = "blade";
       this.trySwing();
     }
   };
@@ -1151,7 +1151,7 @@ export class Game {
         const headY = target.mesh.position.y + target.height * 0.82;
         let dmg = perPellet;
         let crit = hitPoint.y > headY;
-        if (this.buffs.has("hollowpoint") && Math.random() < 0.2) crit = true;
+        if (this.buffs.has("precision") && Math.random() < 0.2) crit = true;
         if (crit) dmg *= 3;
         this.damageEnemy(target, dmg, w.stun, dir, crit);
         if (!this.isHost) this.net.send({ t: "damage", i: target.nid, dmg, from: this.selfNetId });
@@ -1172,7 +1172,7 @@ export class Game {
 
   private meleeHits() {
     const dir = this.lookDir();
-    const dmg = (34 + 10 * this.lvl("machete")) * (this.buffs.has("juggernaut") ? 1 : 1);
+    const dmg = (34 + 10 * this.lvl("blade")) * (this.buffs.has("juggernaut") ? 1 : 1);
     let any = false;
     for (const e of this.enemies) {
       if (!e.alive) continue;
@@ -1182,7 +1182,7 @@ export class Game {
       if (d > 3.0 + e.radius) continue;
       const dot = (dx / d) * dir.x + (dz / d) * dir.z;
       if (dot < 0.55) continue;
-      const stun = (26 + 4 * this.lvl("machete")) * (this.buffs.has("concussor") ? 1.5 : 1);
+      const stun = (26 + 4 * this.lvl("blade")) * (this.buffs.has("shockcoil") ? 1.5 : 1);
       this.damageEnemy(e, dmg, stun, new THREE.Vector3(dx / d, 0, dz / d), false, "melee");
       any = true;
     }
@@ -1235,7 +1235,7 @@ export class Game {
     let dmg = amount;
     if (e.downTimer > 0) {
       dmg *= source === "melee" || source === "tackle" ? 2.5 : 1.6;
-      if (this.buffs.has("executioner")) dmg *= 2.2;
+      if (this.buffs.has("overload")) dmg *= 2.2;
     }
     if (source === "tackle" && this.buffs.has("juggernaut")) dmg *= 2;
     e.hp -= dmg * e.resist;
@@ -1247,7 +1247,7 @@ export class Game {
     e.vx += dir.x * kb;
     e.vz += dir.z * kb;
     if (stun > 0 && e.downTimer <= 0) {
-      e.stun += this.buffs.has("concussor") && source !== "melee" ? stun * 1.5 : stun;
+      e.stun += this.buffs.has("shockcoil") && source !== "melee" ? stun * 1.5 : stun;
       if (e.stun >= e.stunMax) {
         e.stun = 0;
         e.downTimer = ENEMIES[e.kind].downTime;
@@ -1260,7 +1260,7 @@ export class Game {
     if (e.hp <= 0) this.killEnemy(e, source);
   }
 
-  private killEnemy(e: Enemy, source: "gun" | "melee" | "tackle" | "lava" | "geyser") {
+  private killEnemy(e: Enemy, source: "gun" | "melee" | "tackle" | "plasma" | "vent") {
     if (!e.alive) return;
     e.alive = false;
     e.corpse = 1.1;
@@ -1280,16 +1280,16 @@ export class Game {
       }
     }
     // environmental deaths never count as kills, however the enemy ended up there
-    const hazard = source === "lava" || source === "geyser";
+    const hazard = source === "plasma" || source === "vent";
     if (!hazard) this.kills++;
     this.combo++;
     this.comboTimer = 3;
     this.sfx.play("kill");
     this.sparks(e.mesh.position.x, e.mesh.position.y + 0.6, e.mesh.position.z, 16);
     let reward = 8 + this.wave * 2 + ENEMIES[e.kind].bounty + ELITES[e.elite].bounty;
-    if (source === "lava" || source === "geyser") {
+    if (source === "plasma" || source === "vent") {
       reward += 25;
-      const where = source === "lava" ? "Lava" : "Geyser";
+      const where = source === "plasma" ? "Plasma" : "Vent";
       this.toast(`${where} took one — no kill credit (+bonus slag)`, "info");
       this.fireBurst(e.mesh.position.x, e.mesh.position.z);
       if (this.buffs.has("wildfire")) {
@@ -1300,7 +1300,7 @@ export class Game {
         }
       }
     }
-    if (source === "melee" && this.buffs.has("bloodletter")) this.heal(12);
+    if (source === "melee" && this.buffs.has("recycler")) this.heal(12);
     if (this.buffs.has("secondwind") && this.combo % 3 === 0) this.stamina = this.maxStamina;
     if (this.buffs.has("scavenger") && Math.random() < 0.25) {
       this.spawnPickupAt("ammo", e.mesh.position.x, e.mesh.position.z);
@@ -1319,7 +1319,7 @@ export class Game {
 
   private hurt(v: number, kind: "hit" | "burn" = "hit", sx?: number, sz?: number) {
     if (this.downed) return;
-    if (kind === "burn" && this.buffs.has("furnaceborn")) v *= 0.4;
+    if (kind === "burn" && this.buffs.has("heatshield")) v *= 0.4;
     if (this.dodgeT > 0) return; // i-frames
     this.hp -= v;
     if (sx !== undefined && sz !== undefined) {
@@ -1349,7 +1349,9 @@ export class Game {
     this.reviveT = 0;
     this.sfx.play("down");
     this.toast(
-      this.adrenaline > 0 ? "DOWNED — hold E to inject adrenaline" : "DOWNED — no adrenaline left",
+      this.adrenaline > 0
+        ? "SYSTEMS DOWN — hold E to run a repair cell"
+        : "SYSTEMS DOWN — no repair cells left",
       "bad",
     );
   }
@@ -1828,11 +1830,11 @@ export class Game {
 
       // hazards kill enemies
       if (this.arena.inLava(m.position.x, m.position.z)) {
-        this.killEnemy(e, "lava");
+        this.killEnemy(e, "plasma");
         continue;
       }
       if (this.arena.inEruption(m.position.x, m.position.z)) {
-        this.killEnemy(e, "geyser");
+        this.killEnemy(e, "vent");
         continue;
       }
 
