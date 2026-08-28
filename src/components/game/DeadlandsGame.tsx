@@ -9,7 +9,8 @@ const EMPTY: HudState = {
   selfName: "Hero",
   roster: [],
   captures: 0,
-  captureGoal: 3,
+  score: 0,
+  bestScore: 0,
   flagMode: "base",
   flagHolder: "",
   flagMine: false,
@@ -104,8 +105,8 @@ export default function DeadlandsGame() {
   }, []);
 
   // one arena for now; kept as a lookup so more can be added back later
-  const activeMap = MAPS[0];
-  const mapId = activeMap.id;
+  const [mapId, setMapId] = useState(MAPS[0].id);
+  const activeMap = MAPS.find((m) => m.id === mapId) ?? MAPS[0];
 
   const [name, setName] = useState("Hero");
   const [joinCode, setJoinCode] = useState("");
@@ -141,6 +142,11 @@ export default function DeadlandsGame() {
   }, []);
 
   const start = useCallback(() => gameRef.current?.startRun(mapId), [mapId]);
+  // swap the arena immediately so the title screen previews it behind the menu
+  const pickMap = useCallback((id: string) => {
+    setMapId(id);
+    gameRef.current?.setMap(id);
+  }, []);
   const resume = useCallback(() => gameRef.current?.resume(), []);
   const restart = useCallback(() => gameRef.current?.restart(), []);
 
@@ -202,10 +208,11 @@ export default function DeadlandsGame() {
       {playing && (
         <div className="pointer-events-none absolute left-1/2 top-20 -translate-x-1/2 text-center">
           <div className="text-display text-sm tracking-widest uppercase">
-            Cores secured{" "}
-            <span className="text-ember">
-              {hud.captures}/{hud.captureGoal}
-            </span>
+            Wave {hud.wave} · <span className="text-ember">{hud.score.toLocaleString()}</span>{" "}
+            <span className="text-muted-foreground">pts</span>
+            {hud.captures > 0 && (
+              <span className="text-muted-foreground"> · {hud.captures} cores</span>
+            )}
           </div>
           <div
             className={`text-xs ${
@@ -482,30 +489,13 @@ export default function DeadlandsGame() {
       )}
 
       {/* game over */}
-      {hud.phase === "victory" && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background/90 backdrop-blur">
-          <h2 className="text-display text-5xl text-ember">City secured</h2>
-          <p className="max-w-md text-center text-sm text-muted-foreground">
-            All {hud.captureGoal} cores recovered from the invaders. Neo Kestrel holds — for now.
-          </p>
-          <p className="text-sm text-muted-foreground">
-            Reached wave <span className="text-display text-foreground">{hud.wave}</span> ·{" "}
-            <span className="text-display text-foreground">{hud.kills}</span> machines destroyed
-          </p>
-          <button
-            onClick={restart}
-            className="text-display rounded-sm bg-ember px-8 py-3 text-lg text-ember-foreground"
-          >
-            Run it again
-          </button>
-        </div>
-      )}
-
       {hud.phase === "gameover" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background/90 backdrop-blur">
           <h2 className="text-display text-5xl text-destructive">You died in the ash</h2>
           <div className="text-display text-lg">
-            Wave {hud.wave} · {hud.kills} machines scrapped · best wave {hud.bestWave}
+            <span className="text-display text-ember">{hud.score.toLocaleString()}</span> points · wave {hud.wave} · {hud.kills} machines scrapped
+            <br />
+            best {hud.bestScore.toLocaleString()} · best wave {hud.bestWave}
           </div>
           <button
             onClick={restart}
@@ -523,6 +513,27 @@ export default function DeadlandsGame() {
             <p className="text-display text-sm tracking-[0.5em] text-ember">{activeMap.tagline}</p>
             <h1 className="text-display text-6xl leading-none md:text-8xl">{activeMap.name}</h1>
             <p className="mx-auto mt-4 max-w-xl text-sm text-muted-foreground">{activeMap.blurb}</p>
+          </div>
+
+          <div className="flex flex-wrap items-stretch justify-center gap-3">
+            {MAPS.map((m) => {
+              const selected = m.id === mapId;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => pickMap(m.id)}
+                  aria-pressed={selected}
+                  className={`w-56 rounded-md border px-4 py-3 text-left transition-colors ${
+                    selected
+                      ? "border-ember bg-ember/15"
+                      : "border-border bg-card/70 hover:border-ember/60"
+                  }`}
+                >
+                  <span className="text-display block text-base">{m.name}</span>
+                  <span className="block text-xs text-muted-foreground">{m.tagline}</span>
+                </button>
+              );
+            })}
           </div>
 
           <div className="w-[min(560px,92vw)] rounded-md border border-border bg-card/70 p-4">
@@ -638,7 +649,7 @@ export default function DeadlandsGame() {
             ))}
           </div>
           <p className="text-xs text-muted-foreground">
-            Best wave on {activeMap.name}:{" "}
+            Best on {activeMap.name}: {hud.bestScore.toLocaleString()} pts · wave{" "}
             <span className="text-display text-ember">{hud.bestWave || "—"}</span> · Solo campaign —
             downed heroes run repair cells to get back up.
           </p>

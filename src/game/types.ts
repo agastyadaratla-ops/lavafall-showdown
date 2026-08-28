@@ -1,11 +1,4 @@
-export type Phase =
-  | "title"
-  | "playing"
-  | "respite"
-  | "draft"
-  | "paused"
-  | "gameover"
-  | "victory";
+export type Phase = "title" | "playing" | "respite" | "draft" | "paused" | "gameover";
 
 export interface ShopItem {
   id: string;
@@ -43,7 +36,8 @@ export interface HudState {
   net: NetStatus;
   selfName: string;
   captures: number;
-  captureGoal: number;
+  score: number;
+  bestScore: number;
   bossName: string;
   /** 0..1 remaining health of the active boss */
   bossHp: number;

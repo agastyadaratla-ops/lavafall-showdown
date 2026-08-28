@@ -134,7 +134,72 @@ const NEO_CITY: MapDef = {
   alienBase: [0, -26],
 };
 
-export const MAPS: MapDef[] = [NEO_CITY];
+const TIDEWATCH: MapDef = {
+  id: "tidewatch",
+  name: "Tidewatch Docks",
+  tagline: "Hold the flooded port",
+  blurb:
+    "Storm surge took the lower docks and the invaders tapped the coolant main to keep their siphon running. Low cover, long sightlines, and a burning channel between you and everything worth taking.",
+  cta: "Deploy to the docks",
+
+  // dawn over a wet port: cold teal air, warm coolant glow
+  background: 0x1b3038,
+  fogColor: 0x2a4a52,
+  fogNear: 40,
+  fogFar: 190,
+  domeColor: 0x2f5560,
+
+  ground: 0x2b3538,
+  band: 0x35464a,
+  bank: 0x141c1e,
+  bridge: 0x4a4438,
+  rim: 0x1f2a2e,
+
+  hazardName: "coolant",
+  hazardHalf: 4.6,
+  // hot amber against the cold dock palette
+  hazardRamp: { r: [200, 55], g: [110, 120], b: [30, 60] },
+  hazardRepeat: [14, 2],
+  hazardY: -0.12,
+  hazardDrift: 0.04,
+  hazardLight: 0xffa63a,
+  hazardLightIntensity: 2.3,
+
+  // wider crossings than downtown, but further apart
+  bridges: [
+    [-24, -16],
+    [5, 14],
+  ],
+  vents: [
+    [-21, 12],
+    [-6, -17],
+    [10, 14],
+    [25, -9],
+    [-28, -6],
+    [16, 20],
+    [1, 24],
+    [-13, -23],
+  ],
+  ventRing: 0x6ff0d0,
+  ventColumn: 0xc8fff0,
+
+  hemiSky: 0x8fbcc8,
+  hemiGround: 0x28353a,
+  hemiIntensity: 1.6,
+  sunColor: 0xffe3bd,
+  sunIntensity: 0.9,
+
+  props: "blocks",
+  propColor: 0x33454a,
+  accent: 0xffb347,
+  enemyTint: { charger: 0xd8562f, ranged: 0xffd24a, rusher: 0xe0784a },
+
+  // corner to corner, so the run home crosses the channel at an angle
+  heroBase: [22, 20],
+  alienBase: [-22, -20],
+};
+
+export const MAPS: MapDef[] = [NEO_CITY, TIDEWATCH];
 
 export function getMap(id: string): MapDef {
   return MAPS.find((m) => m.id === id) ?? NEO_CITY;

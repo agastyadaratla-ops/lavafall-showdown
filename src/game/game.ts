@@ -95,6 +95,7 @@ interface Projectile {
   life: number;
 }
 
+const scoreKey = (mapId: string) => `neokestrel.bestScore.${mapId}`;
 const bestKey = (mapId: string) =>
   mapId === "deadlands" ? "deadlands.bestWave" : `deadlands.bestWave.${mapId}`;
 const MAX_ALIVE = 34;
@@ -229,7 +230,9 @@ export class Game {
   private flag: NetFlag = { mode: "base", carrier: "", x: 0, z: 0, ret: 0 };
   private flagMesh: THREE.Mesh | null = null;
   private captures = 0;
-  private captureGoal = 3;
+  /** survival score: machines scrapped, waves survived and cores recovered */
+  private score = 0;
+  private bestScore = 0;
 
   constructor(canvas: HTMLCanvasElement, onState: (s: HudState) => void) {
     this.canvas = canvas;
@@ -306,6 +309,7 @@ export class Game {
     for (let i = 0; i < n; i++) pos[i * 3 + 1] = -999;
 
     this.bestWave = Number(localStorage.getItem(bestKey(this.mapDef.id)) || 0);
+    this.bestScore = Number(localStorage.getItem(scoreKey(this.mapDef.id)) || 0);
 
     window.addEventListener("resize", this.onResize);
     window.addEventListener("keydown", this.onKeyDown);
@@ -627,17 +631,11 @@ export class Game {
           this.flag.z = c.z;
           if (Math.hypot(c.x - hx, c.z - hz) < 3.5) {
             this.captures++;
-            this.addSlag(120);
+            this.addSlag(220);
+            this.addScore(500);
             this.resetFlag();
             this.sfx.play("buff");
-            if (this.captures >= this.captureGoal) {
-              this.phase = "victory";
-              this.releaseLock();
-              this.toast("City secured - every core recovered!", "good");
-              this.pushState();
-              return;
-            }
-            this.toast(`Core secured! ${this.captures}/${this.captureGoal}`, "good");
+            this.toast(`Core recovered! +500 · ${this.captures} this run`, "good");
           }
         }
       } else {
@@ -766,6 +764,7 @@ export class Game {
     this.scene.add(this.arena.group);
     this.applyTheme();
     this.bestWave = Number(localStorage.getItem(bestKey(this.mapDef.id)) || 0);
+    this.bestScore = Number(localStorage.getItem(scoreKey(this.mapDef.id)) || 0);
     this.pushState();
   }
 
@@ -913,6 +912,7 @@ export class Game {
     this.combo = 0;
     this.magBonus = 0;
     this.captures = 0;
+    this.score = 0;
     this.resetFlag();
     this.ammo = this.freshAmmo();
     this.adrenaline = 1;
@@ -982,7 +982,7 @@ export class Game {
 
   private beginRespite() {
     this.phase = "respite";
-    this.respiteLeft = 14;
+    this.respiteLeft = 12;
     this.releaseLock();
     for (let i = 0; i < 3; i++) this.spawnPickup();
     this.pushState();
@@ -996,14 +996,13 @@ export class Game {
       this.bestWave = this.wave;
       localStorage.setItem(bestKey(this.mapDef.id), String(this.bestWave));
     }
-    // only a cleared boss earns a breather; otherwise the next wave rolls straight on
-    if (bossForWave(this.wave) === null) {
-      this.startWave(this.wave + 1);
-      return;
-    }
+    this.addScore(100 * this.wave);
+    // every wave earns a breather to spend slag; a buff draft lands every third
+    // wave and after each boss
     const pool = BUFFS.filter((b) => !this.buffs.has(b.id));
-    this.draft = pool.sort(() => Math.random() - 0.5).slice(0, 3);
-    if (this.draft.length) {
+    const wantsDraft = this.wave % 3 === 0 || bossForWave(this.wave) !== null;
+    if (wantsDraft && pool.length) {
+      this.draft = pool.sort(() => Math.random() - 0.5).slice(0, 3);
       this.phase = "draft";
       this.releaseLock();
       this.pushState();
@@ -1350,7 +1349,9 @@ export class Game {
     this.comboTimer = 3;
     this.sfx.play("kill");
     this.sparks(e.mesh.position.x, e.mesh.position.y + 0.6, e.mesh.position.z, 16);
-    let reward = 8 + this.wave * 2 + ENEMIES[e.kind].bounty + ELITES[e.elite].bounty;
+    const worth = ENEMIES[e.kind].bounty + ELITES[e.elite].bounty;
+    this.addScore(10 + worth);
+    let reward = 8 + this.wave * 2 + worth;
     if (source === "plasma" || source === "vent") {
       reward += 25;
       const where = source === "plasma" ? "Plasma" : "Vent";
@@ -1371,6 +1372,15 @@ export class Game {
     }
     this.addSlag(reward);
     if (this.combo >= 3 && this.combo % 3 === 0) this.toast(`${this.combo}x streak`, "good");
+  }
+
+  /** Survival score. Banked to local best whenever a run ends. */
+  private addScore(v: number) {
+    this.score += Math.round(v);
+    if (this.score > this.bestScore) {
+      this.bestScore = this.score;
+      localStorage.setItem(scoreKey(this.mapDef.id), String(this.bestScore));
+    }
   }
 
   private addSlag(v: number) {
@@ -1756,6 +1766,8 @@ export class Game {
     // movement
     const input = this.moveInput();
     let speed = this.downed ? 1.6 : sprinting ? 9.4 : 6.1;
+    // hauling the core slows you down, so a run home has to be earned
+    if (this.flag.mode === "carried" && this.flag.carrier === this.selfNetId) speed *= 0.8;
     if (this.buffs.has("featherfoot") && sprinting) speed += 0.6;
     let vx = input.x * speed;
     let vz = input.y * speed;
@@ -2197,7 +2209,8 @@ export class Game {
       net: this.netStatus,
       selfName: this.playerName,
       captures: this.captures,
-      captureGoal: this.captureGoal,
+      score: this.score,
+      bestScore: this.bestScore,
       bossName: this.bossRef && this.bossRef.alive ? ENEMIES[this.bossRef.kind].name : "",
       bossHp:
         this.bossRef && this.bossRef.alive
