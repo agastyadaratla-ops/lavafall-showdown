@@ -1,29 +1,57 @@
-# Welcome to your Lovable project
+# Neo Kestrel
 
-This project was built with [Lovable](https://lovable.dev).
+A browser co-op shooter. Alien machines have occupied the city and parked a
+siphon on the far bank of a plasma channel. Take the core back, run it home,
+and hold the line.
 
-## Build with Lovable
+Play: https://agastyadaratla-ops.github.io/lavafall-showdown/
 
-Open your project in the [Lovable editor](https://lovable.dev) and keep building.
+## Playing
 
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: connect the project to GitHub and every change made in Lovable is committed straight to your repository.
-- **Full ownership**: this code is yours. Push to your repository and your changes sync back into Lovable, ready for your next prompt.
+- **WASD** move, **mouse** look, **LMB** fire, **RMB** quick machete
+- **1-5 / Q** swap weapons, **R** reload
+- **Shift** sprint, **Space** dodge roll, **F** tackle
+- **E** hold to self-revive when downed, **Esc** pause
+
+Recover three cores to win. Every fifth wave is guarded by a boss that has to
+fall before the wave advances.
+
+## Co-op
+
+Host a game to get a five-character room code, or join with one. Connections are
+peer-to-peer over WebRTC, so there is no server and no account. The host
+simulates enemies, waves and the core; every player owns their own movement.
 
 ## Development
 
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+Needs Node.js 22+.
 
 ```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
+npm install
 npm run dev
 ```
 
+| Script | Does |
+| --- | --- |
+| `npm run dev` | Dev server |
+| `npm run build` | SSR/Nitro build |
+| `npm run build:pages` | Static build for GitHub Pages |
+| `npm run lint` | ESLint + Prettier |
+
+Pushing to `main` deploys the static build to GitHub Pages automatically.
+
+## Layout
+
+| Path | What lives there |
+| --- | --- |
+| `src/game/game.ts` | Simulation, player, combat, wave flow |
+| `src/game/enemies.ts` | Enemy and boss registry, elite prefixes |
+| `src/game/weapons.ts` | Weapon registry |
+| `src/game/maps.ts` | Arena definition and palette |
+| `src/game/arena.ts` | Arena geometry built from a map definition |
+| `src/game/net.ts` | Peer-to-peer co-op transport |
+| `pages/` | Entry point for the static GitHub Pages build |
+
 ## Built with
 
-- TanStack Start
-- TypeScript
-- React
-- Tailwind CSS
+TanStack Start, React, TypeScript, Three.js, Tailwind CSS, PeerJS.
